@@ -1,0 +1,7 @@
+.menu{position:fixed;min-width:190px;max-height:70vh;overflow-y:auto;background:var(--bg);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:4px;z-index:100}
+.item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 10px;border:none;background:transparent;border-radius:5px;font-size:12px;color:var(--text);cursor:pointer;text-align:left}
+.item:hover:not(:disabled){background:var(--accent-bg);color:var(--accent-text)}
+.item:disabled{color:var(--text3);cursor:default}
+.item kbd{font-family:var(--mono);font-size:10px;color:var(--text3)}
+.danger{color:var(--danger)}
+.sep{height:1px;background:var(--border);margin:4px 2px}

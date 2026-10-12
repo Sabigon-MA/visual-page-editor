@@ -1,0 +1,15 @@
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#ffffff;--bg2:#f7f7f6;--bg3:#f0eeeb;
+  --text:#111110;--text2:#6b6b68;--text3:#a8a8a4;
+  --border:#e5e4e0;--border2:#d0cfca;
+  --accent:#3b7ef6;--accent-bg:#e8f0fe;--accent-text:#1a56c4;
+  --danger:#e24b4a;--success:#1d9e75;
+  --mono:'DM Mono',ui-monospace,monospace;
+}
+html,body,#root{height:100%}
+body{font-family:'DM Sans',system-ui,sans-serif;font-size:13px;background:var(--bg2);color:var(--text);overflow:hidden}
+button,input,select,textarea{font-family:inherit}
+
+/* プレビューモード中は編集用の操作を無効にする */
+[data-mode="preview"] .edit-only{opacity:.4;pointer-events:none}
