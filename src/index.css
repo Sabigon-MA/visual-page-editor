@@ -11,5 +11,3 @@ html,body,#root{height:100%}
 body{font-family:'DM Sans',system-ui,sans-serif;font-size:13px;background:var(--bg2);color:var(--text);overflow:hidden}
 button,input,select,textarea{font-family:inherit}
 
-/* プレビューモード中は編集用の操作を無効にする */
-[data-mode="preview"] .edit-only{opacity:.4;pointer-events:none}

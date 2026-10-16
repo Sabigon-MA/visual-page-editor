@@ -1,6 +1,5 @@
 import { useEditor } from '../../store/elements';
 import { AnimationPanel } from './AnimationPanel';
-import { LayersPanel } from './LayersPanel';
 import styles from './Panels.module.css';
 import { PropertiesPanel } from './PropertiesPanel';
 
@@ -16,7 +15,6 @@ export function RightPanel() {
       <div className={`${styles.content} edit-only`}>
         {panel === 'props' ? <PropertiesPanel /> : <AnimationPanel />}
       </div>
-      <LayersPanel />
     </div>
   );
 }

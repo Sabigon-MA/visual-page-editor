@@ -24,22 +24,11 @@ export const EASINGS = [
   ['linear', 'linear'], ['cubic-bezier(0.34,1.56,0.64,1)', 'spring'],
 ];
 export const DIRECTIONS = ['normal', 'reverse', 'alternate'];
-export const TRIGGERS = [['onLoad', 'ページ読込時'], ['onClick', 'クリック時'], ['onHover', 'ホバー時']];
+export const TRIGGERS = [['onLoad', 'ページ読込時'], ['onView', 'スクロールで表示されたとき'], ['onClick', 'クリック時'], ['onHover', 'ホバー時']];
 
 export const SHADOWS: [string, string][] = [
   ['none', 'なし'],
   ['0 1px 3px rgba(0,0,0,.12)', '小'],
   ['0 4px 14px rgba(0,0,0,.14)', '中'],
   ['0 12px 32px rgba(0,0,0,.18)', '大'],
-];
-
-export const FONTS: [string, string][] = [
-  ["'DM Sans',sans-serif", 'DM Sans'],
-  ["'Playfair Display',serif", 'Playfair Display'],
-  ["'DM Mono',monospace", 'DM Mono'],
-  ['sans-serif', 'sans-serif'],
-  ['serif', 'serif'],
-  ['monospace', 'monospace'],
-  ['Georgia,serif', 'Georgia'],
-  ['Arial,sans-serif', 'Arial'],
 ];

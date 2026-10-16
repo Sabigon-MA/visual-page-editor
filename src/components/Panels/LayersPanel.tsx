@@ -3,7 +3,7 @@ import { typeLabel } from '../../model/elementTypes';
 import { hasAnim } from '../../runtime/defaults';
 import { useEditor } from '../../store/elements';
 import { Icon } from '../common/Fields';
-import { elementMenu } from '../ContextMenu/menus';
+import { elementMenu, openAddMenu } from '../ContextMenu/menus';
 import { useMenu } from '../ContextMenu/menuStore';
 import styles from './Panels.module.css';
 
@@ -15,32 +15,38 @@ const UNLOCK = '<rect x="3" y="7" width="10" height="7" rx="1"/><path d="M5 7V5a
 // レイヤー一覧（上が前面）。ドラッグで並び替え、目のアイコンで表示切替、鍵でロック
 export function LayersPanel() {
   const elements = useEditor((s) => s.elements);
-  const selectedId = useEditor((s) => s.selectedId);
+  const selectedIds = useEditor((s) => s.selectedIds);
   const { select, toggleHidden, toggleLock, moveLayer } = useEditor.getState();
   const openMenu = useMenu((m) => m.open);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
 
   return (
-    <div className={`${styles.layersWrap} edit-only`}>
-      <div className={styles.layersHead}>レイヤー</div>
+    <div className={styles.layersWrap}>
+      {elements.length === 0 && (
+        <div className={styles.layersEmpty}>
+          要素はまだありません。
+          <button className={styles.linkBtn} onClick={openAddMenu}>＋ 要素を追加</button>
+        </div>
+      )}
       <div className={styles.layers}>
         {[...elements].reverse().map((el) => (
           <div
             key={el.id}
             className={[
               styles.layer,
-              el.id === selectedId && styles.layerActive,
+              selectedIds.includes(el.id) && styles.layerActive,
               el.hidden && styles.layerHidden,
               el.id === dragId && styles.layerDragging,
               el.id === overId && dragId !== el.id && styles.layerDrop,
             ].filter(Boolean).join(' ')}
             draggable
-            onClick={() => select(el.id)}
+            title="クリックで選択（Shift / Ctrl で追加選択）／ドラッグで重なり順を変更"
+            onClick={(e) => select(el.id, { toggle: e.shiftKey || e.ctrlKey || e.metaKey, only: true })}
             onContextMenu={(e) => {
               e.preventDefault();
               if (el.hidden) return;
-              select(el.id);
+              select(el.id, { keepGroup: true });
               openMenu(e.clientX, e.clientY, elementMenu(el.id));
             }}
             onDragStart={(e) => {
@@ -66,6 +72,7 @@ export function LayersPanel() {
           >
             <div className={styles.layerIcon}>{typeLabel(el)[0]}</div>
             <span className={styles.layerName}>{typeLabel(el)}{el.text ? ` — ${el.text.slice(0, 10)}` : ''}</span>
+            {el.group && <span className={styles.layerGroup} title={`グループ ${el.group}`}>{el.group}</span>}
             {hasAnim(el.anim) && <span className={styles.layerAnim}>{el.anim.type}</span>}
             <button
               className={`${styles.layerBtn} ${el.hidden ? styles.layerBtnOn : ''}`}

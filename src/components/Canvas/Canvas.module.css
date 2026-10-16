@@ -1,26 +1,71 @@
-.wrap{flex:1;min-width:0;overflow:auto;display:flex;align-items:flex-start;padding:28px;background:#d8d8d5;background-image:radial-gradient(circle,#bbbbb8 1px,transparent 1px);background-size:20px 20px;min-height:0}
+.area{flex:1;min-width:0;min-height:0;position:relative;display:flex;flex-direction:column}
+.wrap{flex:1;min-width:0;overflow:auto;background:#d8d8d5;background-image:radial-gradient(circle,#bbbbb8 1px,transparent 1px);background-size:20px 20px;min-height:0}
+.panning,.panning *{cursor:grab !important}
 /* margin:auto で中央寄せ（justify-content:center だと、はみ出した左側にスクロールできない） */
-.canvas{background:#fff;position:relative;flex-shrink:0;margin:0 auto;box-shadow:0 2px 20px rgba(0,0,0,.12)}
+.stage{position:relative;margin:0 auto;flex-shrink:0}
+/* --inv は表示倍率の逆数。ハンドルや枠線を、倍率によらず同じ太さで表示するのに使う */
+.canvas{position:absolute;top:28px;transform-origin:0 0}
+/* 表示の枠（表示の幅の画面）。ページの背景色で塗る */
+.frame{position:absolute;top:0;box-shadow:0 2px 20px rgba(0,0,0,.12);pointer-events:none}
+/* 表示の幅を変えるつまみと、枠の上の幅の表示 */
+.widthHandle{position:absolute;top:28px;width:14px;cursor:ew-resize;z-index:2;display:flex;justify-content:center}
+.widthHandle i{position:sticky;top:calc(50% - 28px);margin-top:80px;width:6px;height:56px;border-radius:3px;background:#b9bfc8;transition:background .12s,width .12s}
+.widthHandle:hover i{background:var(--accent);width:8px}
+.widthLabel{position:absolute;top:6px;transform:translateX(-50%);font-size:11px;color:var(--text2);white-space:nowrap;font-variant-numeric:tabular-nums;pointer-events:none}
+/* 幅いっぱいの帯は、表示の幅まで左右に伸ばして描く */
+.bleed{position:absolute;top:0;bottom:0}
 
 .el{position:absolute;cursor:move;user-select:none}
 .el.locked{cursor:default}
-.selected{outline:2px solid var(--accent);outline-offset:1px}
+.selected{outline:calc(2px * var(--inv)) solid var(--accent);outline-offset:calc(1px * var(--inv))}
 .selected.locked{outline-style:dashed}
 /* 編集中はフォーム要素を操作できないようにし、ドラッグを優先する */
 .el > :first-child *{pointer-events:none}
 
-.handle{position:absolute;width:8px;height:8px;background:var(--accent);border:1.5px solid #fff;border-radius:2px;z-index:10;box-shadow:0 0 0 1px var(--accent)}
-.tl{top:-5px;left:-5px;cursor:nw-resize}
-.tr{top:-5px;right:-5px;cursor:ne-resize}
-.bl{bottom:-5px;left:-5px;cursor:sw-resize}
-.br{bottom:-5px;right:-5px;cursor:se-resize}
-.tm{top:-5px;left:50%;transform:translateX(-50%);cursor:n-resize}
-.bm{bottom:-5px;left:50%;transform:translateX(-50%);cursor:s-resize}
-.lm{left:-5px;top:50%;transform:translateY(-50%);cursor:w-resize}
-.rm{right:-5px;top:50%;transform:translateY(-50%);cursor:e-resize}
+.handle{position:absolute;width:calc(9px * var(--inv));height:calc(9px * var(--inv));background:#fff;border:calc(1.5px * var(--inv)) solid var(--accent);border-radius:calc(2px * var(--inv));z-index:10;transform:translate(-50%,-50%)}
+.tl{top:0;left:0;cursor:nwse-resize}
+.tr{top:0;left:100%;cursor:nesw-resize}
+.bl{top:100%;left:0;cursor:nesw-resize}
+.br{top:100%;left:100%;cursor:nwse-resize}
+.tm{top:0;left:50%;cursor:ns-resize}
+.bm{top:100%;left:50%;cursor:ns-resize}
+.lm{top:50%;left:0;cursor:ew-resize}
+.rm{top:50%;left:100%;cursor:ew-resize}
 
-.animBadge{position:absolute;top:-12px;right:0;font-size:9px;padding:1px 5px;background:var(--accent);color:#fff;border-radius:6px;pointer-events:none;white-space:nowrap;font-family:var(--mono)}
-.lockBadge{position:absolute;top:-12px;left:0;font-size:9px;padding:1px 5px;background:var(--text2);color:#fff;border-radius:6px;pointer-events:none}
+.animBadge,.lockBadge,.linkBadge{position:absolute;font-size:calc(9px * var(--inv));padding:calc(1px * var(--inv)) calc(5px * var(--inv));color:#fff;border-radius:calc(6px * var(--inv));pointer-events:none;white-space:nowrap;line-height:1.4}
+.animBadge{bottom:100%;right:0;margin-bottom:calc(2px * var(--inv));background:var(--accent);font-family:var(--mono)}
+.lockBadge{bottom:100%;left:0;margin-bottom:calc(2px * var(--inv));background:var(--text2)}
+.linkBadge{top:100%;left:0;margin-top:calc(2px * var(--inv));background:#7f56d9;max-width:calc(220px * var(--inv));overflow:hidden;text-overflow:ellipsis}
 .inlineEditor{position:absolute;inset:0;width:100%;height:100%;padding:10px;border:none;outline:2px solid var(--accent);background:rgba(255,255,255,.96);resize:none;z-index:20;line-height:1.3}
 
-.preview{cursor:default}
+.guideV,.guideH{position:absolute;background:#ff3d71;pointer-events:none;z-index:30}
+.guideV{top:0;bottom:0;width:calc(1px * var(--inv))}
+.guideH{left:0;right:0;height:calc(1px * var(--inv))}
+/* 等間隔の印：間隔の線と両端の短い線 */
+.gapH,.gapV{position:absolute;pointer-events:none;z-index:30;border-color:#ff3d71;border-style:solid;border-width:0}
+.gapH{height:calc(9px * var(--inv));transform:translateY(-50%);border-left-width:calc(1px * var(--inv));border-right-width:calc(1px * var(--inv));background:linear-gradient(#ff3d71,#ff3d71) center/100% calc(2px * var(--inv)) no-repeat}
+.gapV{width:calc(9px * var(--inv));transform:translateX(-50%);border-top-width:calc(1px * var(--inv));border-bottom-width:calc(1px * var(--inv));background:linear-gradient(#ff3d71,#ff3d71) center/calc(2px * var(--inv)) 100% no-repeat}
+.selBox{position:absolute;outline:calc(1px * var(--inv)) dashed var(--accent);pointer-events:none;z-index:25}
+.selBox .handle{pointer-events:auto}
+.groupBox{outline-style:solid;outline-width:calc(1.5px * var(--inv))}
+.groupBadge{position:absolute;bottom:100%;right:0;margin-bottom:calc(2px * var(--inv));font-size:calc(9px * var(--inv));padding:calc(1px * var(--inv)) calc(5px * var(--inv));background:var(--accent);color:#fff;border-radius:calc(6px * var(--inv));white-space:nowrap;line-height:1.4}
+.rotateHandle{position:absolute;left:50%;top:calc(-26px * var(--inv));width:calc(12px * var(--inv));height:calc(12px * var(--inv));transform:translate(-50%,-50%);border-radius:50%;background:#fff;border:calc(1.5px * var(--inv)) solid var(--accent);cursor:grab;z-index:10}
+.rotateHandle::after{content:'';position:absolute;left:50%;top:100%;width:calc(1px * var(--inv));height:calc(14px * var(--inv));background:var(--accent);transform:translateX(-50%)}
+/* 書式のコピー中：要素をクリックすると書式を貼り付ける */
+.brush .el,.brush .el.locked{cursor:copy}
+.marquee{position:absolute;border:calc(1px * var(--inv)) solid var(--accent);background:rgba(59,126,246,.08);pointer-events:none;z-index:40}
+.fold{position:absolute;left:0;right:0;border-top:calc(1px * var(--inv)) dashed #e0702f;pointer-events:none;z-index:5}
+.fold span{position:absolute;right:0;top:0;font-size:calc(10px * var(--inv));padding:calc(1px * var(--inv)) calc(6px * var(--inv));background:#e0702f;color:#fff;border-radius:0 0 calc(4px * var(--inv)) calc(4px * var(--inv));white-space:nowrap}
+.empty{position:absolute;left:50%;top:min(40%, 240px);transform:translate(-50%,-50%) scale(var(--inv));transform-origin:50% 50%;text-align:center;color:var(--text3);font-size:13px;line-height:1.8;pointer-events:none;white-space:nowrap}
+.emptyTitle{font-size:15px;font-weight:600;color:var(--text2)}
+
+
+.outside{position:absolute;top:0;background:repeating-linear-gradient(45deg,rgba(224,112,47,.07) 0 calc(10px * var(--inv)),transparent 0 calc(20px * var(--inv)));border-left:calc(1px * var(--inv)) dashed #e0702f;pointer-events:none}
+.outside span{position:absolute;left:calc(6px * var(--inv));top:calc(6px * var(--inv));font-size:calc(10px * var(--inv));color:#c0561c;white-space:nowrap}
+.shared{position:absolute;left:0;right:0;outline:calc(1px * var(--inv)) dashed #8b5cf6;pointer-events:none;z-index:4}
+.shared span{position:absolute;left:0;top:0;font-size:calc(10px * var(--inv));padding:calc(1px * var(--inv)) calc(6px * var(--inv));background:#8b5cf6;color:#fff;border-radius:0 0 calc(4px * var(--inv)) 0;white-space:nowrap}
+.pageEnd{position:absolute;left:0;right:0;height:calc(14px * var(--inv));margin-top:calc(-7px * var(--inv));cursor:ns-resize;z-index:6;display:flex;justify-content:center;align-items:center}
+.pageEnd::before{content:'';position:absolute;left:0;right:0;top:50%;border-top:calc(2px * var(--inv)) solid transparent}
+.pageEnd:hover::before{border-top-color:#3b7ef6}
+.pageEnd span{position:relative;top:calc(14px * var(--inv));font-size:calc(10px * var(--inv));padding:calc(1px * var(--inv)) calc(8px * var(--inv));background:#6b6b68;color:#fff;border-radius:calc(4px * var(--inv));white-space:nowrap}
+.pageEnd:hover span{background:#3b7ef6}

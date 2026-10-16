@@ -14,6 +14,10 @@ export function AnimationPanel() {
   const update = useEditor((s) => s.update);
   const commit = useEditor((s) => s.commit);
   const previewAnim = useEditor((s) => s.previewAnim);
+  const count = useEditor((s) => s.selectedIds.length);
+  if (count > 1) {
+    return <NoSelection icon="◎">複数の要素を選択中です<br />アニメーションは1つずつ設定します</NoSelection>;
+  }
   if (!el) {
     return <NoSelection icon="◎">要素を選択して<br />アニメーションを設定</NoSelection>;
   }

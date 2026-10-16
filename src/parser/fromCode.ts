@@ -1,87 +1,15 @@
 import { parse, parseExpression } from '@babel/parser';
 import type { Expression, JSXElement, Node } from '@babel/types';
-import { ALLOWED_PROPS, ANIM_KEYS, BOOLEAN_KEYS, NUMBER_KEYS } from '../codegen/props';
-import { ANIM_NAMES } from '../model/animations';
-import { BOX_TYPES, NO_ANIM, resolveBox } from '../runtime/defaults';
-import type { CodeFormat, ElementType, PageElement } from '../types/element';
+import { BOOLEAN_KEYS } from '../codegen/props';
+import type { CodeFormat, PageElement } from '../types/element';
+import { buildElement, type ParseError, type ParseOptions, type ParseResult, type Pos } from './validate';
 
-export interface ParseError {
-  message: string;
-  line: number; // 1 始まり
-  column: number; // 1 始まり
-}
-
-export type ParseResult = { ok: true; elements: PageElement[] } | { ok: false; errors: ParseError[] };
-
-interface Pos {
-  line: number;
-  column: number;
-}
+export type { ParseError, ParseOptions, ParseResult } from './validate';
 
 class CodeError extends Error {
   constructor(message: string, public pos: Pos) {
     super(message);
   }
-}
-
-const TRIGGERS = ['onLoad', 'onClick', 'onHover'];
-
-// ---------- 共通：プロパティの検証と要素の組み立て ----------
-
-function buildElement(raw: Record<string, unknown>, text: string, pos: Pos, errors: ParseError[]): PageElement | null {
-  const before = errors.length;
-  const err = (message: string) => errors.push({ message, ...pos });
-
-  for (const k of Object.keys(raw)) {
-    if (!ALLOWED_PROPS.has(k)) err(`不明なプロパティ "${k}" です`);
-  }
-  for (const k of NUMBER_KEYS) {
-    if (raw[k] === undefined) continue;
-    const n = typeof raw[k] === 'string' && raw[k] !== '' ? Number(raw[k]) : raw[k];
-    if (typeof n !== 'number' || !Number.isFinite(n)) err(`${k} は数値で指定してください`);
-    else raw[k] = n;
-  }
-  for (const k of BOOLEAN_KEYS) {
-    if (raw[k] !== undefined && typeof raw[k] !== 'boolean') err(`${k} は true / false で指定してください`);
-  }
-  for (const k of Object.keys(raw)) {
-    if (ALLOWED_PROPS.has(k) && k !== 'anim' && !(NUMBER_KEYS as readonly string[]).includes(k) && !(BOOLEAN_KEYS as readonly string[]).includes(k) && typeof raw[k] !== 'string') {
-      err(`${k} は文字列で指定してください`);
-    }
-  }
-
-  const id = raw.id;
-  if (typeof id !== 'string' || !id) err('id は必須です');
-  else if (!/^[A-Za-z_][\w-]*$/.test(id)) err(`id "${id}" には英数字・_・- のみ使えます`);
-  if (raw.type === undefined) err('type は必須です');
-  else if (!BOX_TYPES.includes(raw.type as ElementType)) err(`type "${String(raw.type)}" は使えません（${BOX_TYPES.join(' / ')}）`);
-  for (const k of ['x', 'y', 'w', 'h']) {
-    if (raw[k] === undefined) err(`${k} は必須です`);
-  }
-
-  if (raw.anim !== undefined) {
-    const a = raw.anim;
-    if (typeof a !== 'object' || a === null || Array.isArray(a)) err('anim はオブジェクトで指定してください');
-    else {
-      const anim = { ...NO_ANIM, ...(a as Record<string, unknown>) } as Record<string, unknown>;
-      for (const k of Object.keys(a)) {
-        if (!(ANIM_KEYS as string[]).includes(k)) err(`anim の不明なプロパティ "${k}" です`);
-      }
-      if (typeof anim.iter === 'number') anim.iter = String(anim.iter);
-      if (anim.type !== 'none' && !ANIM_NAMES.includes(anim.type as string)) err(`anim.type "${String(anim.type)}" は使えません`);
-      if (!TRIGGERS.includes(anim.trigger as string)) err(`anim.trigger は ${TRIGGERS.join(' / ')} のいずれかです`);
-      for (const k of ['duration', 'delay']) {
-        if (typeof anim[k] !== 'number' || !Number.isFinite(anim[k])) err(`anim.${k} は数値で指定してください`);
-      }
-      for (const k of ['iter', 'easing', 'direction']) {
-        if (typeof anim[k] !== 'string') err(`anim.${k} は文字列で指定してください`);
-      }
-      raw.anim = anim;
-    }
-  }
-
-  if (errors.length > before) return null;
-  return resolveBox({ ...(raw as unknown as PageElement), text });
 }
 
 // 他のエラーがある要素も含めて、書かれた id の重複を調べる
@@ -157,7 +85,7 @@ function findBoxes(node: unknown, out: JSXElement[]) {
   }
 }
 
-export function parseReact(code: string): ParseResult {
+export function parseReact(code: string, opts: ParseOptions = {}): ParseResult {
   let ast;
   try {
     ast = parse(code, { sourceType: 'module', plugins: ['jsx', 'typescript'] });
@@ -205,7 +133,7 @@ export function parseReact(code: string): ParseResult {
       throw e;
     }
     ids.push({ id: raw.id, pos });
-    const el = buildElement(raw, text.trim(), pos, errors);
+    const el = buildElement(raw, text, pos, errors, opts);
     if (el) result.push({ el, pos });
   }
   checkDuplicates(ids, errors);
@@ -222,7 +150,7 @@ function lineColAt(code: string, offset: number): Pos {
 
 const camel = (s: string) => s.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
 
-export function parseVue(code: string): ParseResult {
+export function parseVue(code: string, opts: ParseOptions = {}): ParseResult {
   const open = /<template>/.exec(code);
   const close = code.lastIndexOf('</template>');
   if (!open || close < open.index) {
@@ -249,6 +177,7 @@ export function parseVue(code: string): ParseResult {
   nodes.forEach((node, i) => {
     const pos = boxStarts[i];
     const raw: Record<string, unknown> = {};
+    let text = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
     try {
       if (node.querySelector('*')) throw new CodeError('<Box> の中身には文字列だけを書けます', pos);
       for (const a of [...node.attributes]) {
@@ -269,7 +198,10 @@ export function parseVue(code: string): ParseResult {
           } catch (e) {
             throw new CodeError(`:${name} の式が不正です: ${(e as Error).message.replace(/\s*\(\d+:\d+\)$/, '')}`, pos);
           }
-          raw[name] = evalLiteral(expr);
+          const v = evalLiteral(expr);
+          if (name !== 'text') raw[name] = v;
+          else if (typeof v === 'string') text = v;
+          else throw new CodeError(':text には文字列を指定してください', pos);
         } else if ((BOOLEAN_KEYS as readonly string[]).includes(name) && (a.value === '' || a.value === 'true' || a.value === 'false')) {
           raw[name] = a.value !== 'false';
         } else raw[name] = a.value;
@@ -282,14 +214,13 @@ export function parseVue(code: string): ParseResult {
       throw e;
     }
     ids.push({ id: raw.id, pos });
-    const text = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
-    const el = buildElement(raw, text, pos, errors);
+    const el = buildElement(raw, text, pos, errors, opts);
     if (el) result.push({ el, pos });
   });
   checkDuplicates(ids, errors);
   return errors.length ? { ok: false, errors } : { ok: true, elements: result.map((r) => r.el) };
 }
 
-export function fromCode(code: string, format: CodeFormat): ParseResult {
-  return format === 'react' ? parseReact(code) : parseVue(code);
+export function fromCode(code: string, format: CodeFormat, opts: ParseOptions = {}): ParseResult {
+  return format === 'react' ? parseReact(code, opts) : parseVue(code, opts);
 }

@@ -11,3 +11,7 @@
 .error:hover{background:#3a2626}
 .errorPos{font-family:var(--mono);color:#c08070;flex-shrink:0}
 .selectedLine{background:rgba(59,126,246,.18)}
+.title{font-family:var(--mono);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.held{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#3a3320;color:#e8c872;font-size:11px;line-height:1.5;border-bottom:1px solid #5a4d25;flex-shrink:0}
+.heldBtn{margin-left:auto;flex-shrink:0;height:22px;padding:0 8px;border:1px solid #8a7535;border-radius:4px;background:transparent;color:#e8c872;font-size:11px;cursor:pointer}
+.heldBtn:hover{background:#5a4d25}

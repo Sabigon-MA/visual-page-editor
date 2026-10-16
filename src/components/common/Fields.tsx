@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 // 入力中は onChange で即時反映し、確定（フォーカスを外す・Enter）で onCommit を呼ぶ。
 // onCommit で履歴に積むので、1文字ごとに Undo が増えない。
@@ -75,6 +75,22 @@ export function TextField({ value, onChange, onCommit, className, placeholder }:
   );
 }
 
+// 複数行の入力（表のセル）。Ctrl + Enter で確定する
+export function TextAreaField({ value, onChange, onCommit, className, rows = 4 }: TextFieldProps & { rows?: number }) {
+  return (
+    <textarea
+      className={className}
+      value={value}
+      rows={rows}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={() => onCommit?.()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) (e.target as HTMLTextAreaElement).blur();
+      }}
+    />
+  );
+}
+
 interface ColorFieldProps {
   value: string;
   onChange(v: string): void;
@@ -83,19 +99,29 @@ interface ColorFieldProps {
   title?: string;
 }
 
-// <input type="color"> は確定時に change イベントが来るので、そこで onCommit を呼ぶ
+// <input type="color"> は、色を選んでいる間は input イベント、確定したときに change イベントが来る。
+// React の onChange は input イベントで呼ばれるため、確定（履歴に積む）はネイティブの change イベントで拾う。
 export function ColorField({ value, onChange, onCommit, className, title }: ColorFieldProps) {
+  const ref = useRef<HTMLInputElement>(null);
+  const handlers = useRef({ onChange, onCommit });
+  handlers.current = { onChange, onCommit };
+  useEffect(() => {
+    const input = ref.current!;
+    const onNativeChange = () => {
+      handlers.current.onChange(input.value);
+      handlers.current.onCommit?.();
+    };
+    input.addEventListener('change', onNativeChange);
+    return () => input.removeEventListener('change', onNativeChange);
+  }, []);
   return (
     <input
+      ref={ref}
       type="color"
       className={className}
       title={title}
       value={value}
-      onInput={(e) => onChange((e.target as HTMLInputElement).value)}
-      onChange={(e) => {
-        onChange(e.target.value);
-        onCommit?.();
-      }}
+      onChange={(e) => onChange(e.target.value)}
     />
   );
 }

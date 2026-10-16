@@ -1,3 +1,5 @@
+import { parseStroke, type Stroke } from '../runtime/styles';
+
 export function escapeHTML(s: string): string {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
@@ -13,16 +15,13 @@ export function hexColor(c: string): string {
   return '#' + m.slice(0, 3).map((x) => Number(x).toString(16).padStart(2, '0')).join('');
 }
 
-export interface BorderParts {
-  width: number;
-  style: string;
-  color: string;
-}
+export type BorderParts = Stroke;
 
+// 入力欄に出すための枠線。色は #rrggbb にし、枠線なしのときは既定の色を出す
 export function parseBorder(b: string): BorderParts {
-  const m = String(b || '').match(/([\d.]+)px\s+(\w+)\s+(.+)/);
-  if (!m) return { width: 0, style: 'solid', color: '#3b7ef6' };
-  return { width: Number(m[1]), style: m[2], color: hexColor(m[3]) };
+  const s = parseStroke(b);
+  // テーマの色（var(--c1)）はそのまま
+  return s.width ? { ...s, color: s.color.startsWith('var(') ? s.color : hexColor(s.color) } : { width: 0, style: 'solid', color: '#3b7ef6' };
 }
 
 export function formatBorder({ width, style, color }: BorderParts): string {

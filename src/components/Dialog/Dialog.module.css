@@ -1,0 +1,62 @@
+.overlay{position:fixed;inset:0;background:rgba(17,17,16,.32);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px}
+.dialog{max-width:100%;max-height:calc(100vh - 32px);display:flex;flex-direction:column;background:var(--bg);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.title{padding:16px 20px 4px;font-size:15px;font-weight:600}
+.body{padding:8px 20px;overflow-y:auto}
+.footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px 16px}
+.message{font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:8px}
+.btn{height:32px;padding:0 16px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;cursor:pointer}
+.btn:hover:not(:disabled){background:var(--bg2)}
+.btn:disabled{opacity:.45;cursor:default}
+.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+.primary:hover:not(:disabled){background:#2f6fe0}
+.danger{background:var(--danger);border-color:var(--danger);color:#fff;font-weight:500}
+.danger:hover:not(:disabled){background:#cc3b3a}
+
+.group{margin-top:12px}
+.groupTitle{font-size:10px;font-weight:600;color:var(--text3);letter-spacing:.07em;margin-bottom:6px}
+.presets{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.preset{display:grid;grid-template-columns:36px 1fr;grid-template-rows:auto auto;align-items:center;column-gap:8px;padding:8px 10px;border:1px solid var(--border2);border-radius:8px;background:var(--bg);cursor:pointer;text-align:left}
+.preset:hover{border-color:var(--accent)}
+.presetOn{border-color:var(--accent);background:var(--accent-bg);box-shadow:0 0 0 1px var(--accent)}
+.screenIcon{grid-row:1/3;justify-self:center;border:1.5px solid var(--text2);border-radius:2px;background:var(--bg)}
+.presetLabel{font-size:12px;font-weight:500;color:var(--text)}
+.presetSize{font-size:10px;color:var(--text3);font-family:var(--mono)}
+.custom{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
+.custom label{display:flex;align-items:center;gap:6px}
+.input{width:80px;height:30px;padding:0 8px;border:1px solid var(--border2);border-radius:6px;font-size:12px;outline:none}
+.input:focus{border-color:var(--accent)}
+.swap{width:30px;height:30px;border:1px solid var(--border2);border-radius:6px;background:var(--bg);cursor:pointer;color:var(--text2)}
+.swap:hover{background:var(--bg2)}
+.error{margin-top:6px;font-size:11px;color:var(--danger)}
+.note{margin-top:14px;padding:8px 10px;border-radius:6px;font-size:11px;line-height:1.6}
+.note{background:var(--bg2);color:var(--text2)}
+
+@media (max-width:560px){.presets{grid-template-columns:repeat(2,1fr)}}
+
+/* スタート画面の大きな表示 */
+.large .group{margin-top:20px}
+.large .groupTitle{font-size:11px;margin-bottom:8px}
+.large .presets{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.large .preset{grid-template-columns:48px 1fr;padding:14px 16px;border-radius:10px}
+.large .presetLabel{font-size:14px}
+.large .presetSize{font-size:11.5px}
+.large .input{width:96px;height:34px;font-size:13px}
+.large .custom{font-size:13px}
+
+/* 設定のフォーム */
+.form{display:flex;flex-direction:column;gap:14px;padding:6px 0 4px}
+.field{display:flex;flex-direction:column;gap:5px;font-size:12px}
+.field>span{font-weight:600;color:var(--text)}
+.field small{font-size:11px;color:var(--text3);line-height:1.5}
+.wide{height:32px;padding:0 9px;border:1px solid var(--border2);border-radius:6px;font-size:13px;outline:none;background:var(--bg);color:var(--text)}
+.wide:focus{border-color:var(--accent)}
+.faviconRow{display:flex;align-items:center;gap:8px}
+.favicon{width:32px;height:32px;border:1px solid var(--border2);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text3);background:var(--bg2);overflow:hidden}
+.favicon img{width:20px;height:20px;object-fit:contain}
+.ogImage{width:64px;height:34px;border:1px solid var(--border2);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text3);background:var(--bg2);overflow:hidden}
+.ogImage img{width:100%;height:100%;object-fit:cover}
+.colorRow{display:flex;align-items:center;gap:8px}
+.colorRow .wide{flex:1;min-width:0}
+.colorWell{width:32px;height:32px;padding:2px;border:1px solid var(--border2);border-radius:6px;background:var(--bg);cursor:pointer;flex-shrink:0}
+.colorCode{font-family:var(--mono);font-size:11px;color:var(--text2);width:62px}
+.check{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}

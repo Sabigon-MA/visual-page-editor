@@ -1,5 +1,5 @@
-import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { INLINE_EDIT_TYPES } from '../../model/elementTypes';
+import { memo, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { INLINE_EDIT_TYPES, MULTILINE_TYPES } from '../../model/elementTypes';
 import { BoxInner } from '../../runtime/Box';
 import { hasAnim } from '../../runtime/defaults';
 import { animValue } from '../../runtime/styles';
@@ -7,62 +7,30 @@ import { useEditor } from '../../store/elements';
 import type { PageElement } from '../../types/element';
 import { elementMenu } from '../ContextMenu/menus';
 import { useMenu } from '../ContextMenu/menuStore';
+import { CanvasContext } from './context';
 import styles from './Canvas.module.css';
-
-const HANDLES = ['tl', 'tm', 'tr', 'lm', 'rm', 'bl', 'bm', 'br'] as const;
-type Handle = (typeof HANDLES)[number];
+import { HANDLES } from './interactions';
 
 interface Props {
   el: PageElement;
   selected: boolean;
+  single: boolean; // 選択が1つだけ（リサイズハンドルを出す）
   playing: boolean; // 全アニメーション再生中
   previewN: number; // この要素だけの試し再生（0 = なし）
+  linkName?: string; // リンク先（→ ページ名 / ↗ URL）
+  bleed: number; // 幅いっぱいの帯を左右に伸ばして描く長さ（表示の幅がページより広いとき）
 }
 
-// マウスを押してから離すまで、移動量を受け取り続ける
-function trackDrag(e: React.MouseEvent, onMove: (dx: number, dy: number) => void, onEnd: () => void) {
-  const x0 = e.clientX;
-  const y0 = e.clientY;
-  const move = (ev: MouseEvent) => onMove(ev.clientX - x0, ev.clientY - y0);
-  const up = () => {
-    window.removeEventListener('mousemove', move);
-    window.removeEventListener('mouseup', up);
-    onEnd();
-  };
-  window.addEventListener('mousemove', move);
-  window.addEventListener('mouseup', up);
-  e.preventDefault();
-}
-
-export const CanvasElement = memo(function CanvasElement({ el, selected, playing, previewN }: Props) {
-  const select = useEditor((s) => s.select);
-  const update = useEditor((s) => s.update);
-  const commit = useEditor((s) => s.commit);
+export const CanvasElement = memo(function CanvasElement({ el, selected, single, playing, previewN, linkName, bleed }: Props) {
+  const api = useContext(CanvasContext)!;
   const openMenu = useMenu((m) => m.open);
   const [editing, setEditing] = useState(false);
-
-  const onMouseDown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (e.button !== 0 || editing) return;
-    select(el.id);
-    if (el.locked) return;
-    const { x, y } = el;
-    trackDrag(e, (dx, dy) => update(el.id, { x: Math.max(0, Math.round(x + dx)), y: Math.max(0, Math.round(y + dy)) }), commit);
-  };
-
-  const onResize = (e: React.MouseEvent, h: Handle) => {
-    e.stopPropagation();
-    if (e.button !== 0) return;
-    const { x, y, w, h: h0 } = el;
-    trackDrag(e, (dx, dy) => {
-      let nw = w, nh = h0, nx = x, ny = y;
-      if (h.includes('r')) nw = Math.max(20, w + dx);
-      if (h.includes('l')) { nw = Math.max(20, w - dx); nx = x + w - nw; }
-      if (h.includes('b')) nh = Math.max(10, h0 + dy);
-      if (h.includes('t')) { nh = Math.max(10, h0 - dy); ny = y + h0 - nh; }
-      update(el.id, { x: Math.max(0, Math.round(nx)), y: Math.max(0, Math.round(ny)), w: Math.round(nw), h: Math.round(nh) });
-    }, commit);
-  };
+  const ref = useRef<HTMLDivElement>(null);
+  const asset = useEditor((s) => (el.src ? s.assets[el.src] : undefined));
+  const hovered = useEditor((s) => s.hoverPreview === el.id);
+  const mobile = useEditor((s) => s.device === 'sp');
+  const pageId = useEditor((s) => s.pageId);
+  const shown = useMemo(() => (asset ? { ...el, src: asset } : el), [el, asset]);
 
   let animation: string | undefined;
   if (hasAnim(el.anim) && previewN) animation = animValue(el.anim, 0);
@@ -70,10 +38,17 @@ export const CanvasElement = memo(function CanvasElement({ el, selected, playing
 
   return (
     <div
+      ref={ref}
       className={`${styles.el} ${selected ? styles.selected : ''} ${el.locked ? styles.locked : ''}`}
-      style={{ left: el.x, top: el.y, width: el.w, height: el.h }}
+      style={{ left: el.x, top: el.y, width: el.w, height: el.h, transform: el.rotate ? `rotate(${el.rotate}deg)` : undefined }}
       data-id={el.id}
-      onMouseDown={onMouseDown}
+      onMouseDown={(e) => {
+        if (editing) {
+          e.stopPropagation();
+          return;
+        }
+        api.elementDown(e, el);
+      }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         if (!el.locked && INLINE_EDIT_TYPES.includes(el.type)) setEditing(true);
@@ -81,18 +56,28 @@ export const CanvasElement = memo(function CanvasElement({ el, selected, playing
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        select(el.id);
+        useEditor.getState().select(el.id, { keepGroup: true });
         openMenu(e.clientX, e.clientY, elementMenu(el.id));
       }}
     >
       {/* key を変えると作り直されてアニメーションが最初から再生される */}
-      <BoxInner key={`${playing}-${previewN}`} el={el} animation={animation} />
+      {bleed ? (
+        <div className={styles.bleed} style={{ left: -bleed, right: -bleed }}>
+          <BoxInner key={`${playing}-${previewN}`} el={shown} animation={animation} hovered={hovered} mobile={mobile} page={pageId} />
+        </div>
+      ) : (
+        <BoxInner key={`${playing}-${previewN}`} el={shown} animation={animation} hovered={hovered} mobile={mobile} page={pageId} />
+      )}
       {editing && <InlineEditor el={el} onDone={() => setEditing(false)} />}
       {hasAnim(el.anim) && <div className={styles.animBadge}>{el.anim.type}</div>}
+      {linkName && <div className={styles.linkBadge} title={`クリックで ${linkName} へ移動`}>{linkName}</div>}
       {selected && el.locked && <div className={styles.lockBadge}>ロック中</div>}
-      {selected && !el.locked && !editing && HANDLES.map((h) => (
-        <div key={h} className={`${styles.handle} ${styles[h]}`} onMouseDown={(e) => onResize(e, h)} />
-      ))}
+      {selected && single && !el.locked && !editing && (
+        <>
+          {HANDLES.map((h) => <div key={h} className={`${styles.handle} ${styles[h]}`} onMouseDown={(e) => api.resizeDown(e, el, h)} />)}
+          <div className={styles.rotateHandle} title="ドラッグで回転（Shift で 15° 刻み）" onMouseDown={(e) => api.rotateDown(e, el, ref.current!)} />
+        </>
+      )}
     </div>
   );
 });
@@ -134,9 +119,11 @@ function InlineEditor({ el, onDone }: { el: PageElement; onDone(): void }) {
       onMouseDown={(e) => e.stopPropagation()}
       onBlur={() => finish(true)}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') finish(false);
-        if (e.key === 'Enter' && !e.shiftKey) {
+        // パワーポイントと同じく、Enter で改行し、Esc（または Ctrl + Enter）で編集を終える。改行できない種類は Enter で終える
+        const multiline = MULTILINE_TYPES.includes(el.type);
+        if (e.key === 'Escape' || (e.key === 'Enter' && (multiline ? e.ctrlKey || e.metaKey : !e.shiftKey))) {
           e.preventDefault();
+          e.stopPropagation();
           finish(true);
         }
       }}
