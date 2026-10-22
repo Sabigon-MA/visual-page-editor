@@ -24,7 +24,7 @@ interface Props {
 export const CanvasElement = memo(function CanvasElement({ el, selected, single, playing, previewN, linkName, bleed }: Props) {
   const api = useContext(CanvasContext)!;
   const openMenu = useMenu((m) => m.open);
-  const [editing, setEditing] = useState(false);
+  const editing = useEditor((s) => s.textEditId === el.id);
   const ref = useRef<HTMLDivElement>(null);
   const asset = useEditor((s) => (el.src ? s.assets[el.src] : undefined));
   const hovered = useEditor((s) => s.hoverPreview === el.id);
@@ -51,7 +51,7 @@ export const CanvasElement = memo(function CanvasElement({ el, selected, single,
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        if (!el.locked && INLINE_EDIT_TYPES.includes(el.type)) setEditing(true);
+        if (!el.locked && INLINE_EDIT_TYPES.includes(el.type)) useEditor.getState().setTextEdit(el.id);
       }}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -68,7 +68,7 @@ export const CanvasElement = memo(function CanvasElement({ el, selected, single,
       ) : (
         <BoxInner key={`${playing}-${previewN}`} el={shown} animation={animation} hovered={hovered} mobile={mobile} page={pageId} />
       )}
-      {editing && <InlineEditor el={el} onDone={() => setEditing(false)} />}
+      {editing && <InlineEditor el={el} onDone={() => useEditor.getState().setTextEdit(null)} />}
       {hasAnim(el.anim) && <div className={styles.animBadge}>{el.anim.type}</div>}
       {linkName && <div className={styles.linkBadge} title={`クリックで ${linkName} へ移動`}>{linkName}</div>}
       {selected && el.locked && <div className={styles.lockBadge}>ロック中</div>}
@@ -88,11 +88,21 @@ function InlineEditor({ el, onDone }: { el: PageElement; onDone(): void }) {
   const [value, setValue] = useState(el.text);
   const ref = useRef<HTMLTextAreaElement>(null);
   const done = useRef(false);
+  const latest = useRef(value);
+  latest.current = value;
 
   useEffect(() => {
     ref.current?.focus();
     ref.current?.select();
-  }, []);
+    // ほかの所をクリックして（blur が起きずに）編集が終わったときも、書いた文字を残す
+    const pageId = useEditor.getState().pageId;
+    return () => {
+      if (done.current) return;
+      done.current = true;
+      const s = useEditor.getState();
+      if (s.pageId === pageId && latest.current !== el.text && s.elements.some((e) => e.id === el.id)) s.update(el.id, { text: latest.current }, true);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const finish = (save: boolean) => {
     if (done.current) return;

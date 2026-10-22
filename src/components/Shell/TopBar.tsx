@@ -73,7 +73,9 @@ export function TopBar() {
       <div className={styles.brand}><span className={styles.mark}>P</span>PageEdit</div>
       <button className={styles.project} title={`${filePath ?? (desktop ? 'まだ保存していません' : 'ブラウザに自動保存しています')}\nクリックで新規作成・開く・保存`} onClick={(e) => openBelow(e, fileMenu())}>
         <span className={styles.projectName}>{projectName(filePath)}</span>
-        {dirty && <span className={styles.dirty} title="保存していない変更があります" />}
+        <span className={`${styles.saveState} ${dirty ? styles.dirty : ''}`} title={dirty ? '保存していない変更があります（Ctrl+S で保存）' : '最後に保存したときのままです'}>
+          {dirty ? '未保存' : '保存済み'}
+        </span>
         <Icon path={ICONS.chevron} size={14} />
       </button>
       <button className={styles.icon} title="元に戻す (Ctrl+Z)" disabled={!history.canUndo()} onClick={undo}><Icon path={ICONS.undo} /></button>

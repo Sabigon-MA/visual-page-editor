@@ -5,11 +5,14 @@ import { createPage, DEFAULT_SITE, newProject, pageScreen, unlinkNav } from '../
 import { clampViewW, DEFAULT_SCREEN } from '../model/screens';
 import { composeMobile, composePage, renameFor, sameElements, sharedKind, sharedOf, splitMobile, splitPage, type SharedKind } from '../model/shared';
 import { buildSection, SECTIONS } from '../model/sections';
-import { hasMobileLayout, MOBILE_MAX, SP_H, SP_W } from '../runtime/responsive';
+import {
+  fitSections, nextSectionId, restack, restackMobile, SECTION_H_MAX, SECTION_H_MIN, sectionBand, sectionBase, sectionIndexAt, sectionMembers, sectionTops,
+} from '../model/pageSections';
+import { hasMobileLayout, isBand, MOBILE_MAX, SP_H, SP_W } from '../runtime/responsive';
 import { colorVar, DEFAULT_COLORS } from '../model/theme';
 import { setNavigate } from '../runtime/nav';
 import type {
-  CodeFormat, EditorMode, EditorView, ElementStyle, ElementType, Page, PageElement, Project, Screen, Site, ThemeColor, Workspace,
+  CodeFormat, EditorMode, EditorView, ElementStyle, ElementType, Page, PageElement, PageSection, Project, Screen, Site, ThemeColor, Workspace,
 } from '../types/element';
 import { loadAssets, saveAssets } from './assetDB';
 import { createHistory, type Restored, type Snapshot } from './history';
@@ -34,6 +37,8 @@ export interface EditorState {
   elements: PageElement[]; // 編集中のページの要素（pages の中の配列と同じもの）
   selectedIds: string[];
   selectedId: string | null; // 最後に選んだ要素。プロパティパネルに表示する
+  sectionId: string | null; // 選んでいるセクション（要素を選ぶと外れる）
+  textEditId: string | null; // 文字を書き換えている要素
   source: ChangeSource;
   mode: EditorMode;
   workspace: Workspace;
@@ -75,7 +80,16 @@ export interface EditorState {
   setZoom(zoom: Zoom): void;
 
   add(type: ElementType, pos?: { x: number; y: number }): void;
-  addSection(id: string): void; // セクションのひな形を1つのグループとして入れる
+  addSection(id: string): void; // セクションのひな形を、選んでいるセクションの下（なければ一番下。ヘッダーは先頭）に入れる
+  selectSection(id: string | null): void;
+  insertSection(templateId: string, index: number): void; // セクションのひな形を index 番目に入れ、下のセクションをずらす
+  moveSection(id: string, to: number): void; // セクションを to 番目に移す（要素もまとめて動かす）
+  removeSection(id: string): void; // セクションを中の要素ごと削除し、下を詰める
+  duplicateSection(id: string): void;
+  resizeSection(id: string, h: number, commit?: boolean): void; // 高さを変え、下のセクションをずらす
+  renameSection(id: string, name: string): void;
+  setSectionBg(id: string, bg: string, commit?: boolean): void; // 背景の帯の色（帯がなければ作る）
+  setTextEdit(id: string | null): void;
   // 画像を埋め込んで追加する（id を指定するとその画像要素の画像を差し替える）
   addImage(image: { dataUrl: string; ext: string; w: number; h: number }, opts?: { pos?: { x: number; y: number }; id?: string }): void;
   addAsset(dataUrl: string, ext: string): string; // 画像を埋め込み、パス（assets/img-1.png）を返す
@@ -197,6 +211,9 @@ function withThemeFallback<T extends Partial<PageElement>>(part: T, colors: Them
   return out as T;
 }
 
+// セクションの上端 top から始まる背景の帯か
+export const sectionBandOf = (e: PageElement, top: number, screenW: number) => e.type === 'rect' && isBand(e, screenW) && Math.abs(e.y - top) <= 2;
+
 // グループを含めて選択を広げる
 function withGroups(els: PageElement[], ids: string[]): string[] {
   const groups = new Set(els.filter((e) => ids.includes(e.id) && e.group).map((e) => e.group));
@@ -212,6 +229,8 @@ export function setViewCenter(fn: typeof viewCenter) {
 const saved = loadSaved();
 const initial: Project = saved ?? newProject(DEFAULT_SCREEN);
 const initialSite: Site = initial.site ?? { ...DEFAULT_SITE };
+// セクションの情報がないページ（古いファイル）は、要素の配置からセクションを作る
+const initialPages: Page[] = initial.pages.map((p) => fitSections(p, initialSite, initial.screen));
 // ファイルに一度も保存していない作業中のプロジェクトは、中身があれば「保存していない変更あり」とする
 // （別のファイルを開くときなどに、保存するか尋ねて失わないように）
 const initialFile = (() => {
@@ -244,19 +263,34 @@ export const useEditor = create<EditorState>()((set, get) => {
     const header = sameElements(split.header, shared.header) ? site.header : split.header;
     const footer = sameElements(split.footer, shared.footer) ? site.footer : split.footer;
     const nextSite = header === site.header && footer === site.footer ? site : { ...site, header, footer };
+    const nextPages = withPage(pages, pageId, split.elements, nextSite, site);
+    const page2 = nextPages.find((p) => p.id === pageId)!;
     set({
-      elements: view(split.elements, mobile(), nextSite),
-      pages: pages.map((p) => (p.id === pageId ? { ...p, elements: split.elements } : p)),
+      elements: view(page2.elements, mobile(), nextSite, screen, page2),
+      pages: nextPages,
       site: nextSite,
       source,
       ...extra,
     });
     if (commit) pushHistory();
   };
-  // PC の値（と sp）で、編集中のページの要素配列を書き換える
-  const changeCanonical = (els: PageElement[], extra: Partial<EditorState> = {}) => {
-    const { pages, pageId } = get();
-    set({ elements: view(els), pages: pages.map((p) => (p.id === pageId ? { ...p, elements: els } : p)), source: 'canvas', ...extra });
+  // ページの要素を els にし、セクションとページの長さを整えたページの配列。
+  // 共通のヘッダー・フッターが変わると、どのページもセクションの位置と長さが変わるので整え直す
+  const withPage = (pages: Page[], pageId: string, els: PageElement[], site: Site, before: Site, sections?: PageSection[]) => {
+    const { screen } = get();
+    const shared = site.header !== before.header || site.footer !== before.footer;
+    return pages.map((p) => {
+      // セクションがなくなったら、ページの長さは指定なし（最初に見える範囲）に戻す
+      if (p.id === pageId) return fitSections({ ...p, elements: els, ...(sections ? { sections } : {}), ...(sections && !sections.length ? { h: undefined } : {}) }, site, screen);
+      return shared ? fitSections(p, site, screen) : p;
+    });
+  };
+  // PC の値（と sp）で、編集中のページの要素配列（とセクション）を書き換える
+  const changeCanonical = (els: PageElement[], extra: Partial<EditorState> = {}, sections?: PageSection[]) => {
+    const { pages, pageId, site, screen } = get();
+    const nextPages = withPage(pages, pageId, els, site, site, sections);
+    const page = nextPages.find((p) => p.id === pageId)!;
+    set({ elements: view(page.elements, mobile(), site, screen, page), pages: nextPages, source: 'canvas', ...extra });
     pushHistory();
   };
   const setPages = (pages: Page[], extra: Partial<EditorState> = {}) => {
@@ -265,8 +299,24 @@ export const useEditor = create<EditorState>()((set, get) => {
     set({ pages, pageId: page.id, elements: view(page.elements, mobile(), get().site, get().screen, page), source: 'page', ...extra });
     pushHistory();
   };
+  // 編集中のページのセクションの情報（PC の位置）
+  const sectionCtx = () => {
+    const { site, screen } = get();
+    const page = currentPage(get());
+    const sections = page.sections ?? [];
+    const base = sectionBase(site);
+    return { page, sections, base, site, screen, tops: sectionTops(sections, base) };
+  };
+  // セクションの並びを変える共通処理（PC の表示で操作する）。スマホ用の位置を持つ要素も同じように並べ替える
+  const applySections = (to: PageSection[], extra: Partial<EditorState> = {}, added?: { id: string; els: PageElement[] }) => {
+    const { page, sections, base, site, screen } = sectionCtx();
+    const moved = restack(page.elements, sections, to, base).elements;
+    const els = added ? [...moved, ...added.els] : moved;
+    const withSp = hasMobileLayout(screen.w) ? restackMobile(page.elements, els, sections, to, base, site.header ?? [], screen.w, added) : els;
+    changeCanonical(withSp, extra, to);
+  };
   const find = (id: string) => get().elements.find((e) => e.id === id);
-  const selection = (ids: string[]) => ({ selectedIds: ids, selectedId: ids.length ? ids[ids.length - 1] : null, animPreview: null });
+  const selection = (ids: string[]) => ({ selectedIds: ids, selectedId: ids.length ? ids[ids.length - 1] : null, animPreview: null, sectionId: null, textEditId: null });
   // 指定がなければ選択中の要素
   const targets = (ids?: string[]) => {
     const list = ids ?? get().selectedIds;
@@ -284,27 +334,30 @@ export const useEditor = create<EditorState>()((set, get) => {
     set({ pageId: page.id, elements: view(page.elements, mobile(), get().site, get().screen, page), source: 'page', playing: false, ...selection([]), ...extra });
   };
   const resetProject = (project: Project, filePath: string | null = null) => {
-    const page = project.pages[0];
     const site = project.site ?? { ...DEFAULT_SITE };
+    const pages = project.pages.map((p) => fitSections(p, site, project.screen));
+    const page = pages[0];
     set({
-      screen: project.screen, pages: project.pages, site, assets: project.assets ?? {}, pageId: page.id, elements: view(page.elements, false, site, project.screen, page), source: 'history', device: 'pc', viewW: clampViewW(project.screen.w),
+      screen: project.screen, pages, site, assets: project.assets ?? {}, pageId: page.id, elements: view(page.elements, false, site, project.screen, page), source: 'history', device: 'pc', viewW: clampViewW(project.screen.w),
       ...selection([]), setup: null, home: null, view: 'canvas', mode: 'edit', playing: false, zoom: 'fit', previewTrail: [], filePath, brush: null,
-      saved: { screen: project.screen, pages: project.pages, site },
+      saved: { screen: project.screen, pages, site },
     });
-    history.reset({ screen: project.screen, pages: project.pages, site }, page.id);
+    history.reset({ screen: project.screen, pages, site }, page.id);
   };
 
-  history.reset({ screen: initial.screen, pages: initial.pages, site: initialSite }, initial.pages[0].id);
+  history.reset({ screen: initial.screen, pages: initialPages, site: initialSite }, initialPages[0].id);
 
   return {
     screen: initial.screen,
-    pages: initial.pages,
+    pages: initialPages,
     site: initialSite,
     assets: {},
-    pageId: initial.pages[0].id,
-    elements: view(initial.pages[0].elements, false, initialSite, initial.screen, initial.pages[0]),
+    pageId: initialPages[0].id,
+    elements: view(initialPages[0].elements, false, initialSite, initial.screen, initialPages[0]),
     selectedIds: [],
     selectedId: null,
+    sectionId: null,
+    textEditId: null,
     source: 'canvas',
     mode: 'edit',
     workspace: 'nocode',
@@ -323,7 +376,7 @@ export const useEditor = create<EditorState>()((set, get) => {
     previewTrail: [],
     brush: null,
     filePath: initialFile.path,
-    saved: initialFile.dirty ? null : { screen: initial.screen, pages: initial.pages, site: initialSite },
+    saved: initialFile.dirty ? null : { screen: initial.screen, pages: initialPages, site: initialSite },
 
     select(id, opts = {}) {
       const el = id ? find(id) : undefined;
@@ -413,24 +466,122 @@ export const useEditor = create<EditorState>()((set, get) => {
     },
     addSection(id) {
       const info = SECTIONS.find((x) => x.id === id);
-      const layout = buildSection(id, get().screen.w);
-      if (!info || !layout) return;
-      const { site } = get();
-      const elements = currentPage(get()).elements; // PC の配置に入れる（スマホでは自動で並べる）
-      const bottom = (list: PageElement[]) => list.filter((e) => !e.hidden).reduce((m, e) => Math.max(m, e.y + e.h), 0);
-      // ヘッダーはページの先頭（全ページ共通のヘッダーがあればその下）に入れて、ほかの要素を下にずらす。ほかは一番下に足す
-      const head = bottom(site.header ?? []);
-      const top = info.at === 'top' ? head : Math.max(head, bottom(elements));
-      let els = info.at === 'top' ? elements.map((e) => (e.y >= head ? { ...e, y: e.y + layout.h } : e)) : elements;
-      const group = nextGroupId(els);
-      const ids: string[] = [];
-      for (const part of layout.parts) {
-        const el = createElement(part.type, nextId(els), { ...withThemeFallback(part, site.colors), y: part.y + top, group });
-        els = [...els, el];
-        ids.push(el.id);
+      if (!info) return;
+      // ヘッダーは先頭。ほかは選んでいるセクション（または選んでいる要素のセクション）の下、どちらもなければ一番下
+      const { sections, tops } = sectionCtx();
+      const { sectionId, selectedId } = get();
+      let at = sections.length;
+      if (info.at === 'top') at = 0;
+      else if (sectionId && sections.some((s) => s.id === sectionId)) at = sections.findIndex((s) => s.id === sectionId) + 1;
+      else if (selectedId && !mobile()) {
+        const el = find(selectedId);
+        if (el && !sharedKind(get().site, el.id)) at = sectionIndexAt(tops, el.y) + 1;
       }
-      changeCanonical(els, selection(ids));
+      get().insertSection(id, Math.max(0, at));
     },
+    selectSection(id) {
+      if (get().mode === 'preview') return;
+      set({ ...selection([]), sectionId: id });
+    },
+    insertSection(templateId, index) {
+      if (mobile()) return; // セクションの並びは PC の表示で操作する
+      const info = SECTIONS.find((x) => x.id === templateId);
+      const { sections, base, site, screen, page } = sectionCtx();
+      const layout = buildSection(templateId, screen.w);
+      if (!info || !layout) return;
+      const at = Math.max(0, Math.min(index, sections.length));
+      const sec: PageSection = { id: nextSectionId(sections), name: info.label, h: layout.h };
+      const to = [...sections.slice(0, at), sec, ...sections.slice(at)];
+      const top = sectionTops(to, base)[at];
+      let all = page.elements;
+      const added: PageElement[] = [];
+      for (const part of layout.parts) {
+        const el = createElement(part.type, nextId([...all, ...(site.header ?? []), ...(site.footer ?? [])]), { ...withThemeFallback(part, site.colors), y: part.y + top });
+        all = [...all, el];
+        added.push(el);
+      }
+      applySections(to, { ...selection([]), sectionId: sec.id }, { id: sec.id, els: added });
+    },
+    moveSection(id, to) {
+      if (mobile()) return;
+      const { sections } = sectionCtx();
+      const from = sections.findIndex((s) => s.id === id);
+      const j = Math.max(0, Math.min(to, sections.length - 1));
+      if (from < 0 || from === j) return;
+      const next = [...sections];
+      const [m] = next.splice(from, 1);
+      next.splice(j, 0, m);
+      applySections(next, { ...selection([]), sectionId: id });
+    },
+    removeSection(id) {
+      if (mobile()) return;
+      const { sections } = sectionCtx();
+      if (!sections.some((s) => s.id === id)) return;
+      applySections(sections.filter((s) => s.id !== id), selection([]));
+    },
+    duplicateSection(id) {
+      if (mobile()) return;
+      const { sections, base, page, tops, site } = sectionCtx();
+      const i = sections.findIndex((s) => s.id === id);
+      if (i < 0) return;
+      const src = sections[i];
+      const copy: PageSection = { id: nextSectionId(sections), name: `${src.name} のコピー`, h: src.h };
+      const to = [...sections.slice(0, i + 1), copy, ...sections.slice(i + 1)];
+      const dy = sectionTops(to, base)[i + 1] - tops[i];
+      const members = new Set(sectionMembers(page.elements, sections, base)[i]);
+      let all = [...page.elements, ...(site.header ?? []), ...(site.footer ?? [])];
+      const made = regroup(page.elements.filter((e) => members.has(e.id)).map((e) => ({ ...structuredClone(e), locked: false, sp: undefined })), all);
+      const added = made.map((e) => {
+        const el: PageElement = { ...e, id: nextId(all), y: e.y + dy };
+        all = [...all, el];
+        return el;
+      });
+      applySections(to, { ...selection([]), sectionId: copy.id }, { id: copy.id, els: added });
+    },
+    resizeSection(id, h, commit = true) {
+      if (mobile()) return;
+      const { sections, page, base, site, screen } = sectionCtx();
+      const i = sections.findIndex((s) => s.id === id);
+      if (i < 0) return;
+      // 中の要素の下端より短くはしない
+      const top = sectionTops(sections, base)[i];
+      const members = new Set(sectionMembers(page.elements, sections, base)[i]);
+      const inner = page.elements.filter((e) => members.has(e.id) && !e.hidden && !sectionBandOf(e, top, screen.w)).reduce((m, e) => Math.max(m, e.y + e.h - top), 0);
+      const next = Math.round(Math.max(SECTION_H_MIN, inner, Math.min(SECTION_H_MAX, h)));
+      if (next === sections[i].h) return;
+      const to = sections.map((s) => (s.id === id ? { ...s, h: next } : s));
+      // 背景の帯もセクションの高さに合わせる
+      const band = sectionBand(page.elements, top, sections[i].h, screen.w);
+      const moved = restack(page.elements, sections, to, base).elements.map((e) => (band && e.id === band.id ? { ...e, h: next } : e));
+      const nextPages = withPage(get().pages, page.id, moved, site, site, to);
+      const p = nextPages.find((x) => x.id === page.id)!;
+      set({ pages: nextPages, elements: view(p.elements, false, site, screen, p), source: 'canvas' });
+      if (commit) pushHistory();
+    },
+    renameSection(id, name) {
+      const n = name.trim();
+      const { sections, page } = sectionCtx();
+      if (!n || !sections.some((s) => s.id === id && s.name !== n)) return;
+      changeCanonical(page.elements, {}, sections.map((s) => (s.id === id ? { ...s, name: n.slice(0, 40) } : s)));
+    },
+    setSectionBg(id, bg, commit = true) {
+      const { sections, page, tops, screen, site } = sectionCtx();
+      const i = sections.findIndex((s) => s.id === id);
+      if (i < 0) return;
+      const band = sectionBand(page.elements, tops[i], sections[i].h, screen.w);
+      let els: PageElement[];
+      if (band) els = page.elements.map((e) => (e.id === band.id ? { ...e, bg } : e));
+      else {
+        // 帯がなければ、セクションの一番後ろ（重なり順の先頭）に作る
+        const el = createElement('rect', nextId([...page.elements, ...(site.header ?? []), ...(site.footer ?? [])]), { x: 0, y: tops[i], w: screen.w, h: sections[i].h, bg, border: 'none', borderRadius: '0px' });
+        els = [el, ...page.elements];
+      }
+      const nextPages = withPage(get().pages, page.id, els, site, site);
+      const p = nextPages.find((x) => x.id === page.id)!;
+      set({ pages: nextPages, elements: view(p.elements, mobile(), site, screen, p), source: 'canvas' });
+      if (commit) pushHistory();
+    },
+    setTextEdit: (textEditId) => set({ textEditId }),
     addAsset(dataUrl, ext) {
       const { assets } = get();
       const same = Object.keys(assets).find((k) => assets[k] === dataUrl);
@@ -640,15 +791,20 @@ export const useEditor = create<EditorState>()((set, get) => {
     },
     clearAll() {
       // 全ページ共通のヘッダー・フッターは残す
+      // セクションもなくす
       const { site } = get();
+      const { page } = sectionCtx();
+      set({ pages: get().pages.map((p) => (p.id === page.id ? { ...p, sections: [] } : p)) });
       change(get().elements.filter((e) => sharedKind(site, e.id)), true, selection([]));
     },
     replaceFromCode(els) {
       // コードは PC の値と sp を書いたもの（表示がスマホでも同じ）
-      const { pages, pageId } = get();
-      const shown = view(els);
+      const { pages, pageId, site, screen } = get();
+      const nextPages = withPage(pages, pageId, els, site, site);
+      const page = nextPages.find((p) => p.id === pageId)!;
+      const shown = view(page.elements, mobile(), site, screen, page);
       const keep = get().selectedIds.filter((id) => shown.some((e) => e.id === id && !e.hidden));
-      set({ elements: shown, pages: pages.map((p) => (p.id === pageId ? { ...p, elements: els } : p)), source: 'code', ...selection(keep) });
+      set({ elements: shown, pages: nextPages, source: 'code', ...selection(keep) });
       pushHistory();
     },
     undo: () => restore(history.undo()),
@@ -668,7 +824,10 @@ export const useEditor = create<EditorState>()((set, get) => {
       const { pages } = get();
       const src = pages.find((p) => p.id === id);
       if (!src) return;
-      const page: Page = { ...createPage(pages, `${src.name} のコピー`, structuredClone(src.elements)), flow: { x: src.flow.x + 30, y: src.flow.y + 30 } };
+      const page: Page = {
+        ...createPage(pages, `${src.name} のコピー`, structuredClone(src.elements)), flow: { x: src.flow.x + 30, y: src.flow.y + 30 },
+        ...(src.sections ? { sections: structuredClone(src.sections) } : {}), ...(src.h ? { h: src.h } : {}),
+      };
       const i = pages.indexOf(src);
       setPages([...pages.slice(0, i + 1), page, ...pages.slice(i + 1)], { pageId: page.id, ...selection([]), playing: false });
     },
@@ -685,14 +844,37 @@ export const useEditor = create<EditorState>()((set, get) => {
     },
     setSite(patch, commit = true) {
       const site = { ...get().site, ...patch };
-      set({ site, ...(patch.header || patch.footer ? { elements: view(currentPage(get()).elements, mobile(), site), source: 'page' as const } : {}) });
+      if ('header' in patch || 'footer' in patch) {
+        // 共通のヘッダー・フッターの高さが変わると、どのページもセクションの位置と長さが変わる
+        const pages = get().pages.map((p) => fitSections(p, site, get().screen));
+        const page = pages.find((p) => p.id === get().pageId)!;
+        set({ site, pages, elements: view(page.elements, mobile(), site, get().screen, page), source: 'page' });
+      } else set({ site });
       if (commit) pushHistory();
     },
     setShared(kind, ids) {
       if (mobile()) return; // PC の表示で操作する
-      const { site, pages, pageId } = get();
-      const list = targets(ids);
+      const { site, pages, pageId, sectionId } = get();
+      // セクションを選んでいれば、そのセクションの要素をまとめて移す
+      let list = targets(ids);
+      if (!ids && !list.length && sectionId && kind) {
+        const { page, sections, base } = sectionCtx();
+        const i = sections.findIndex((s) => s.id === sectionId);
+        if (i >= 0) list = page.elements.filter((e) => sectionMembers(page.elements, sections, base)[i].includes(e.id));
+      }
       if (!list.length) return;
+      if (kind) {
+        // 共通にするときは、選んだ要素のセクションをまるごと移す
+        const { page, sections, base, tops } = sectionCtx();
+        const members = sectionMembers(page.elements, sections, base);
+        const at = new Set(list.filter((e) => !sharedKind(site, e.id)).map((e) => sectionIndexAt(tops, e.y)));
+        const ids3 = new Set([...list.map((e) => e.id), ...[...at].flatMap((i) => (i >= 0 ? members[i] : []))]);
+        list = get().elements.filter((e) => ids3.has(e.id));
+      } else {
+        // このページに戻すときは、共通のヘッダー（フッター）をまるごと戻す
+        const kinds = new Set(list.map((e) => sharedKind(site, e.id)).filter(Boolean));
+        list = get().elements.filter((e) => list.includes(e) || kinds.has(sharedKind(site, e.id)));
+      }
       // グループはまとめて移す
       const sel = new Set(withGroups(get().elements, list.map((e) => e.id)));
       const moving = get().elements.filter((e) => sel.has(e.id));
@@ -713,9 +895,18 @@ export const useEditor = create<EditorState>()((set, get) => {
       const footer = [...rest(shared.footer), ...(kind === 'footer' ? moved : [])].map(relink);
       const nextPage = [...rest(page), ...(kind === null ? moved : [])].map(relink);
       const nextSite = { ...site, header: header.length ? header : undefined, footer: footer.length ? footer : undefined };
-      // このページに戻すときは、表示していた位置（フッターはページの中の位置）にする
-      const nextPages = pages.map((p) => (p.id === pageId ? { ...p, elements: nextPage } : p));
-      set({ site: nextSite, pages: nextPages, elements: view(nextPage, false, nextSite), source: 'page', ...selection(moved.map((e) => e.id)) });
+      // このページに戻すときは、表示していた位置（フッターはページの中の位置）にする。
+      // 共通にするときは、要素がすべて移ったセクションをなくす（ほかのセクションの位置はそのまま）。
+      // このページに戻すときは、セクションの位置（共通のヘッダーの下端から）が変わるので、配置から作り直す
+      const { sections, base } = sectionCtx();
+      const members = sectionMembers(page, sections, base);
+      const keep = kind ? sections.filter((_, i) => !members[i].length || members[i].some((id) => !sel.has(id))) : undefined;
+      const nextPages = pages.map((p) => {
+        if (p.id === pageId) return fitSections({ ...p, elements: nextPage, sections: keep, ...(keep && !keep.length ? { h: undefined } : {}) }, nextSite, get().screen);
+        return fitSections(p, nextSite, get().screen);
+      });
+      const opened = nextPages.find((p) => p.id === pageId)!;
+      set({ site: nextSite, pages: nextPages, elements: view(opened.elements, false, nextSite, get().screen, opened), source: 'page', ...selection(moved.map((e) => e.id)) });
       pushHistory();
     },
     removeThemeColor(id) {

@@ -9,6 +9,7 @@ import { Icon } from '../common/Fields';
 import { insertImage } from '../Shell/fileActions';
 import { ICONS } from '../Shell/icons';
 import shell from '../Shell/Shell.module.css';
+import { toast } from '../common/Toast';
 import { DRAG_TYPE } from './LeftSidebar';
 
 const GROUPS: [string, ElementType[]][] = [
@@ -82,10 +83,15 @@ export function AddPanel() {
         ))}
         {sections.length > 0 && (
           <>
-            <div className={shell.groupLabel}>セクション（ページの一番下に追加。ヘッダーは先頭）</div>
+            <div className={shell.groupLabel}>セクション（選んでいるセクションの下に追加。選んでいなければ一番下、ヘッダーは先頭）</div>
             <div className={shell.sections}>
               {sections.map((s) => (
-                <button key={s.id} className={shell.section} title={s.description} onClick={() => addSection(s.id)}>
+                <button key={s.id} className={shell.section} title={s.description} onClick={() => {
+                  // セクションの並びは PC の表示で組む（スマホの表示は PC の並びから作る）
+                  if (useEditor.getState().device === 'sp') return toast('セクションの追加は PC の表示で行います（表示の幅を 768px 以上にしてください）');
+                  addSection(s.id);
+                  toast(`セクション「${s.label}」を追加しました`);
+                }}>
                   <SectionPreview id={s.id} screenW={screenW} />
                   <b>{s.label}</b>
                   <span>{s.description}</span>

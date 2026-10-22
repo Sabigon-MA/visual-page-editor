@@ -1,7 +1,8 @@
-import type { Page, PageElement, Project, Screen } from '../types/element';
+import type { Page, PageElement, PageSection, Project, Screen } from '../types/element';
 import { createElement, nextGroupId, nextId } from './elementTypes';
 import { createPage, DEFAULT_SITE } from './pages';
-import { buildSection } from './sections';
+import { sectionsPageH } from './pageSections';
+import { buildSection, SECTIONS } from './sections';
 import { renameFor } from './shared';
 import { DEFAULT_COLORS } from './theme';
 
@@ -193,11 +194,11 @@ function replaceText(text: string, texts: Texts): string {
   return Object.entries(texts).reduce((t, [from, to]) => (from.length > 1 && t.includes(from) ? t.split(from).join(to) : t), text);
 }
 
-// セクションを、要素の配列の下（top から）に入れる
-function placeSection(id: string, screenW: number, els: PageElement[], top: number, texts: Texts, headingFont: string): { els: PageElement[]; h: number } {
+// セクションを、要素の配列の下（top から）に入れる。grouped なら1つのグループにする（共通のヘッダー・フッター）
+function placeSection(id: string, screenW: number, els: PageElement[], top: number, texts: Texts, headingFont: string, grouped = false): { els: PageElement[]; h: number } {
   const layout = buildSection(id, screenW);
   if (!layout) return { els, h: 0 };
-  const group = nextGroupId(els);
+  const group = grouped ? nextGroupId(els) : '';
   let out = els;
   for (const part of layout.parts) {
     const el = createElement(part.type, nextId(out), {
@@ -248,7 +249,7 @@ export function buildTemplate(t: SiteTemplate, screen: Screen): Project {
   const shared = (id: 'header' | 'footer', texts: Texts = {}) => {
     const all: Texts = { ...texts, 'サイト名': t.siteName };
     if (id === 'header') all['サービス\n会社概要\nお知らせ'] = menuLabels.join('\n');
-    const { els } = placeSection(id, screen.w, [], 0, all, t.headingFont);
+    const { els } = placeSection(id, screen.w, [], 0, all, t.headingFont, true);
     return renameFor(id, linkTo(els, menuPages, menuLabels), []);
   };
   const header = shared('header', t.header);
@@ -258,12 +259,17 @@ export function buildTemplate(t: SiteTemplate, screen: Screen): Project {
   t.pages.forEach((tp, i) => {
     let els: PageElement[] = [];
     let top = headerH;
+    const sections: PageSection[] = [];
     for (const [id, texts = {}] of tp.sections) {
       const r = placeSection(id, screen.w, els, top, texts, t.headingFont);
       els = r.els;
       top += r.h;
+      // セクションの名前は、ひな形の名前（ヒーロー・料金プランなど）
+      const label = SECTIONS.find((x) => x.id === id)?.label ?? 'セクション';
+      sections.push({ id: `s${sections.length + 1}`, name: label, h: r.h });
     }
-    pages[i] = { ...pages[i], elements: linkTo(els, menuPages, menuLabels) };
+    const h = sectionsPageH(sections, { header, footer });
+    pages[i] = { ...pages[i], elements: linkTo(els, menuPages, menuLabels), sections, ...(h ? { h } : {}) };
   });
 
   return {

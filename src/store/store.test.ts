@@ -402,18 +402,99 @@ describe('セクション', () => {
     }
   });
 
-  it('1つのグループとして一番下に足す。ヘッダーは先頭に入れて、ほかを下にずらす', () => {
+  const page = () => s().pages.find((p) => p.id === s().pageId)!;
+  const names = () => page().sections!.map((x) => x.name);
+  const secId = (name: string) => page().sections!.find((x) => x.name === name)!.id;
+  const topOf = (ids: string[]) => Math.min(...s().elements.filter((e) => ids.includes(e.id)).map((e) => e.y));
+
+  it('選んでいるセクションの下に入れ、下のセクションをずらす。ヘッダーは先頭に入れる', () => {
     s().addSection('hero');
-    const hero = s().elements.length;
     const heroH = buildSection('hero', 1440)!.h;
-    expect(new Set(s().elements.map((e) => e.group)).size).toBe(1);
-    expect(s().selectedIds).toHaveLength(hero);
-    s().addSection('footer');
-    expect(Math.min(...s().elements.slice(hero).map((e) => e.y))).toBe(heroH);
+    expect(names()).toEqual(['ヒーロー']);
+    expect(s().sectionId).toBe(secId('ヒーロー'));
+    expect(new Set(s().elements.map((e) => e.group))).toEqual(new Set([''])); // グループにしない（中の要素を1回で選べる）
+    s().addSection('footer'); // 選んでいるヒーローの下
+    const footer = page().elements.filter((e) => e.y >= heroH).map((e) => e.id);
+    expect(topOf(footer)).toBe(heroH);
+    s().selectSection(secId('ヒーロー'));
+    s().addSection('features');
+    const featuresH = buildSection('features', 1440)!.h;
+    expect(names()).toEqual(['ヒーロー', '特徴（3列）', 'フッター']);
+    expect(topOf(footer)).toBe(heroH + featuresH); // フッターが下にずれた
     s().addSection('header');
     const headerH = buildSection('header', 1440)!.h;
-    expect(s().elements[0].y).toBe(headerH); // ヒーローの背景が下にずれた
-    expect(new Set(s().elements.map((e) => e.group)).size).toBe(3);
+    expect(names()[0]).toBe('ヘッダー');
+    expect(topOf(footer)).toBe(headerH + heroH + featuresH);
+    expect(page().h).toBe(headerH + heroH + featuresH + buildSection('footer', 1440)!.h); // ページの長さはセクションの合計
+  });
+
+  it('並べ替え・複製・削除・高さの変更で、下のセクションの要素がまとめて動く', () => {
+    s().addSection('hero');
+    s().addSection('pricing');
+    s().addSection('faq');
+    const heroH = buildSection('hero', 1440)!.h;
+    const pricingH = buildSection('pricing', 1440)!.h;
+    const faqH = buildSection('faq', 1440)!.h;
+    const faq = page().elements.filter((e) => e.y >= heroH + pricingH).map((e) => e.id);
+    const pricing = page().elements.filter((e) => e.y >= heroH && e.y < heroH + pricingH).map((e) => e.id);
+    s().moveSection(secId('よくある質問'), 1);
+    expect(names()).toEqual(['ヒーロー', 'よくある質問', '料金プラン']);
+    expect(topOf(faq)).toBe(heroH);
+    expect(topOf(pricing)).toBe(heroH + faqH);
+    s().undo();
+    expect(names()).toEqual(['ヒーロー', '料金プラン', 'よくある質問']);
+    expect(topOf(faq)).toBe(heroH + pricingH);
+
+    const n = page().elements.length;
+    s().duplicateSection(secId('料金プラン'));
+    expect(names()).toEqual(['ヒーロー', '料金プラン', '料金プラン のコピー', 'よくある質問']);
+    expect(page().elements).toHaveLength(n + pricing.length);
+    expect(topOf(faq)).toBe(heroH + pricingH * 2);
+    s().removeSection(secId('料金プラン のコピー'));
+    expect(page().elements).toHaveLength(n);
+    expect(topOf(faq)).toBe(heroH + pricingH); // 下が詰まった
+
+    s().resizeSection(secId('料金プラン'), pricingH + 100);
+    expect(topOf(faq)).toBe(heroH + pricingH + 100);
+    const band = s().elements.find((e) => e.id === pricing[0])!;
+    expect(band.h).toBe(pricingH + 100); // 背景の帯も伸びる
+    s().resizeSection(secId('料金プラン'), 10); // 中の要素より短くはしない
+    expect(page().sections![1].h).toBeGreaterThan(200);
+
+    s().removeSection(secId('ヒーロー'));
+    s().removeSection(secId('料金プラン'));
+    s().removeSection(secId('よくある質問'));
+    expect(page().sections).toEqual([]);
+    expect(page().elements).toEqual([]);
+    expect(page().h).toBeUndefined();
+  });
+
+  it('スマホ用の位置を持つ要素も、PC と同じ順に並べ替える', () => {
+    s().addSection('hero');
+    s().addSection('faq');
+    const heroH = buildSection('hero', 1440)!.h;
+    const hero = page().elements.filter((e) => e.y < heroH).map((e) => e.id);
+    const faq = page().elements.filter((e) => e.y >= heroH).map((e) => e.id);
+    s().setDevice('sp');
+    s().relayoutMobile();
+    const t = s().elements.find((e) => e.id === faq[0])!;
+    s().update(t.id, { x: t.x + 1 }, true); // スマホで調整した（sp を持つ）
+    s().setDevice('pc');
+    s().moveSection(secId('よくある質問'), 0);
+    s().setDevice('sp');
+    const spTop = (ids: string[]) => Math.min(...s().elements.filter((e) => ids.includes(e.id) && !e.hidden).map((e) => e.y));
+    expect(spTop(faq)).toBeLessThan(spTop(hero));
+  });
+
+  it('セクションの情報がない古いファイルは、幅いっぱいの帯で区切って作る', () => {
+    const band = (y: number, h: number) => createElement('rect', `e${y}`, { x: 0, y, w: 1440, h, group: `g${y}` });
+    const els = [band(0, 500), createElement('heading', 'e1', { x: 100, y: 100, text: 'ようこそ', group: 'g0' }), band(500, 300), createElement('text', 'e2', { x: 100, y: 600 })];
+    s().loadProject({ version: 1, screen: { w: 1440, h: 900 }, pages: [{ id: 'page-1', name: 'ホーム', elements: els, flow: { x: 0, y: 0 } }] });
+    expect(page().sections!.map((x) => [x.name, x.h])).toEqual([['ようこそ', 500], ['セクション2', 300]]);
+    expect(page().elements.every((e) => !e.group)).toBe(true); // セクションのグループは外す
+    expect(isDirty(s())).toBe(false);
+    const json = serializeProject({ version: 1, screen: s().screen, pages: s().pages, site: s().site });
+    expect(parseProject(json).pages[0].sections).toEqual(page().sections);
   });
 
   it('削除したテーマの色は既定の色の値で入れる', () => {
@@ -491,7 +572,7 @@ describe('全ページ共通のヘッダー・フッター', () => {
   it('ID を h1・f1 … に付け替えて、サイトの設定に移す', () => {
     expect(s().site.header?.map((e) => e.id)).toEqual(expect.arrayContaining(['h1', 'h2']));
     expect(s().site.footer?.[0].id).toBe('f1');
-    expect(new Set(s().site.footer?.map((e) => e.group))).toEqual(new Set(['fg1']));
+    expect(new Set(s().site.footer?.map((e) => e.group))).toEqual(new Set(['']));
     expect(Math.min(...s().site.footer!.map((e) => e.y))).toBe(0); // フッターの上端からの位置
     expect(s().pages[0].elements.map((e) => e.id)).toEqual(['e1']);
   });

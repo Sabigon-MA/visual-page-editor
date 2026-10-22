@@ -14,6 +14,7 @@ import { DEFAULT_SCREEN } from '../../model/screens';
 import { buildTemplate, type SiteTemplate } from '../../model/templates';
 import { IMAGE_EXTS, loadImage, mimeOf } from '../../utils/image';
 import { choiceDialog, confirmDialog } from '../Dialog/confirm';
+import { toast } from '../common/Toast';
 
 // デスクトップ版（Tauri）では OS のダイアログでパスを選んで直接書き込む。ブラウザ版はダウンロード。
 export const desktop = isTauri();
@@ -35,6 +36,7 @@ async function showError(title: string, e: unknown) {
 async function saveBytes(name: string, data: Uint8Array | string, type: string, filter: { name: string; extensions: string[] }) {
   if (!desktop) {
     saveAs(new Blob([data as BlobPart], { type }), name);
+    toast(`「${name}」を書き出しました`);
     return;
   }
   try {
@@ -42,6 +44,7 @@ async function saveBytes(name: string, data: Uint8Array | string, type: string, 
     if (!path) return;
     if (typeof data === 'string') await writeTextFile(path, data);
     else await writeFile(path, data);
+    toast(`「${baseName(path)}」に書き出しました`);
   } catch (e) {
     await showError('書き出せませんでした', e);
   }
@@ -74,6 +77,7 @@ export async function saveProjectFileAs(): Promise<boolean> {
     const json = serializeProject(projectOf(useEditor.getState()));
     saveAs(new Blob([json], { type: 'application/json;charset=utf-8' }), `project.${EXT}`);
     useEditor.getState().markSaved(null);
+    toast('保存しました（ダウンロード）');
     return true;
   }
   try {
@@ -91,6 +95,7 @@ async function writeProject(path: string): Promise<boolean> {
     await writeTextFile(path, serializeProject(projectOf(useEditor.getState())));
     useEditor.getState().markSaved(path);
     useRecent.getState().add(path);
+    toast(`「${baseName(path)}」に保存しました`);
     return true;
   } catch (e) {
     await showError(`「${baseName(path)}」に保存できませんでした`, e);

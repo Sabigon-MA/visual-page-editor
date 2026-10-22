@@ -69,3 +69,30 @@
 .pageEnd:hover::before{border-top-color:#3b7ef6}
 .pageEnd span{position:relative;top:calc(14px * var(--inv));font-size:calc(10px * var(--inv));padding:calc(1px * var(--inv)) calc(8px * var(--inv));background:#6b6b68;color:#fff;border-radius:calc(4px * var(--inv));white-space:nowrap}
 .pageEnd:hover span{background:#3b7ef6}
+
+/* セクション（ページを縦に積んだまとまり）。枠は操作の邪魔をしないようにし、名前・ボタンだけ押せる */
+.section{position:absolute;left:0;right:0;pointer-events:none;z-index:26}
+.sectionHover{outline:calc(1px * var(--inv)) dashed rgba(59,126,246,.6);outline-offset:calc(-1px * var(--inv))}
+.sectionOn{outline:calc(2px * var(--inv)) solid var(--accent);outline-offset:calc(-2px * var(--inv))}
+.secTag{position:absolute;left:0;top:0;transform:scale(var(--inv));transform-origin:0 0;pointer-events:auto;cursor:pointer;padding:2px 8px;background:var(--accent);color:#fff;font-size:11px;line-height:1.5;border-radius:0 0 6px 0;white-space:nowrap}
+.sectionHover .secTag{background:rgba(59,126,246,.75)}
+.secTools{position:absolute;right:calc(8px * var(--inv));top:0;transform:scale(var(--inv)) translateY(-50%);transform-origin:100% 0;pointer-events:auto;display:flex;gap:2px;padding:3px;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.14);z-index:2}
+.secTools button,.elBar button{height:26px;padding:0 9px;border:none;border-radius:6px;background:transparent;color:var(--text);font-size:12px;white-space:nowrap;cursor:pointer}
+.secTools button:hover:not(:disabled),.elBar button:hover{background:var(--bg3)}
+.secTools button:disabled{opacity:.35;cursor:default}
+.secTools .secDanger,.elBar .elBarDanger{color:#d1453b}
+.secResize{position:absolute;left:0;right:0;bottom:0;height:calc(12px * var(--inv));margin-bottom:calc(-6px * var(--inv));pointer-events:auto;cursor:ns-resize;display:flex;justify-content:center;align-items:center;z-index:1}
+.secResize i{width:calc(44px * var(--inv));height:calc(6px * var(--inv));border-radius:calc(3px * var(--inv));background:var(--accent);box-shadow:0 0 0 calc(2px * var(--inv)) #fff}
+.secGap{position:absolute;left:0;right:0;height:0;z-index:27;display:flex;justify-content:center;pointer-events:none}
+.secGap button{pointer-events:auto;transform:scale(var(--inv)) translateY(-50%);transform-origin:50% 0;height:26px;padding:0 12px;border:1px solid var(--accent);border-radius:999px;background:#fff;color:var(--accent-text,var(--accent));font-size:12px;white-space:nowrap;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.secGap button:hover{background:var(--accent);color:#fff}
+.secGap::before{content:'';position:absolute;left:0;right:0;top:0;border-top:calc(2px * var(--inv)) dashed transparent;margin-top:calc(-1px * var(--inv))}
+.secGap:hover::before{border-top-color:var(--accent)}
+
+/* 選んだ要素の上に出す操作のバー */
+.elBar{position:absolute;transform:scale(var(--inv)) translateY(calc(-100% - 40px));transform-origin:0 0;display:flex;align-items:center;gap:1px;padding:3px;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.16);z-index:35;white-space:nowrap}
+.elBarBelow{transform:scale(var(--inv)) translateY(16px)}
+.elBar .elBarOn{background:var(--accent-bg);color:var(--accent-text)}
+.elBarSep{width:1px;height:18px;background:var(--border);margin:0 3px}
+.elBar .elBarDot{width:18px;height:18px;padding:0;margin:0 2px;border-radius:50%;border:1px solid rgba(0,0,0,.15)}
+.elBar .elBarDot:hover{transform:scale(1.15)}

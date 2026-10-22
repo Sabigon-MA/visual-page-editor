@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { clampZoom } from '../components/Canvas/Canvas';
+import { removeSectionWithToast, removeSelectedWithToast } from '../components/Shell/editActions';
 import { insertImageBlob, openProjectFile, saveProjectFile, saveProjectFileAs } from '../components/Shell/fileActions';
 import { isBold } from '../model/elementTypes';
 import { effectiveZoom, selectedElement, useEditor, ZOOM_STEPS } from '../store/elements';
@@ -65,6 +66,7 @@ export function useKeyboardShortcuts() {
       else if (mod && k === 'c') s.copy();
       else if (mod && k === 'x') s.cut();
       else if (mod && k === 'v') return; // 貼り付けは paste イベントで（画像の貼り付けのため）
+      else if (mod && k === 'd' && !s.selectedIds.length && s.sectionId) s.duplicateSection(s.sectionId);
       else if (mod && k === 'd') s.duplicate();
       else if (mod && (k === 'b' || k === 'i')) {
         const el = selectedElement(s);
@@ -75,7 +77,8 @@ export function useKeyboardShortcuts() {
         if (s.brush) s.endBrush();
         else s.select(null);
       }
-      else if (e.key === 'Delete' || e.key === 'Backspace') s.remove();
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && !s.selectedIds.length && s.sectionId) removeSectionWithToast(s.sectionId);
+      else if (e.key === 'Delete' || e.key === 'Backspace') removeSelectedWithToast();
       else if (ARROWS[e.key] && !mod) {
         if (!s.selectedIds.length) return;
         const step = e.shiftKey ? 10 : 1;

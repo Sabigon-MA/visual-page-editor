@@ -15,10 +15,19 @@ export interface Screen {
   h: number;
 }
 
+// ページを縦に区切るセクション（帯）。上から順に積み、要素は上端の位置で、どのセクションに入るかが決まる
+export interface PageSection {
+  id: string; // s1, s2, ...（ページの中で重ならない）
+  name: string;
+  h: number; // 高さ（PC）
+}
+
 export interface Page {
   id: string; // page-1, page-2, ...（コード上のリンク先・書き出し時の URL に使う）
   name: string;
   elements: BoxData[];
+  // セクションの並び（全ページ共通のヘッダーの下から積む）。ない（古いファイル）なら要素の配置から作る
+  sections?: PageSection[];
   flow: { x: number; y: number }; // 画面遷移図でのカードの位置
   slug?: string; // 静的サイトとして書き出すときのファイル名（about → about.html）。先頭のページは常に index.html
   title?: string; // ブラウザのタブ・検索結果に出るタイトル（'' = ページ名）

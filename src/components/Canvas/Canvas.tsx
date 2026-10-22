@@ -1,11 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { typeLabel } from '../../model/elementTypes';
+import { INLINE_EDIT_TYPES, typeLabel } from '../../model/elementTypes';
+import { sectionBase, sectionIndexAt, sectionTops } from '../../model/pageSections';
 import { PAGE_H_MAX, PAGE_H_MIN, pageBg } from '../../model/pages';
 import { isBand } from '../../runtime/responsive';
 import { pageHeight } from '../../runtime/styles';
-import { currentPage, setViewCenter, useEditor, viewScreen } from '../../store/elements';
-import type { ElementType, PageElement } from '../../types/element';
+import { currentPage, sectionBandOf, setViewCenter, useEditor, viewScreen, type EditorState } from '../../store/elements';
+import type { ElementType, PageElement, PageSection } from '../../types/element';
+import { ElementBar } from './ElementBar';
+import { SectionLayer } from './SectionLayer';
 import { canvasMenu } from '../ContextMenu/menus';
 import { useMenu } from '../ContextMenu/menuStore';
 import { DRAG_TYPE } from '../Panels/LeftSidebar';
@@ -32,6 +35,22 @@ function linkLabel(el: PageElement, pageNames: Record<string, string>, elements:
   return `↗ ${el.href.replace(/^(https?:\/\/|mailto:|tel:)/, '').replace(/\/$/, '')}`;
 }
 
+// 位置 y のセクション（PC の表示でだけ。セクションの範囲の外なら null）
+function sectionAt(s: EditorState, y: number): { i: number; sec: PageSection; top: number } | null {
+  const secs = currentPage(s).sections ?? [];
+  if (s.device !== 'pc' || !secs.length) return null;
+  const tops = sectionTops(secs, sectionBase(s.site));
+  if (y < tops[0] - 0.5 || y >= tops[secs.length]) return null;
+  const i = sectionIndexAt(tops, y);
+  return { i, sec: secs[i], top: tops[i] };
+}
+
+// セクションの背景の帯（クリックしたらセクションを選ぶ）
+function isSectionBand(s: EditorState, el: PageElement): boolean {
+  const hit = sectionAt(s, el.y);
+  return !!hit && sectionBandOf(el, hit.top, s.screen.w);
+}
+
 export function clampZoom(z: number): number {
   return Math.min(3, Math.max(0.1, Math.round(z * 100) / 100));
 }
@@ -55,7 +74,9 @@ export function Canvas() {
   const [guides, setGuides] = useState<Guides | null>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [panning, setPanning] = useState(false);
+  const [secHover, setSecHover] = useState(-1); // マウスが乗っているセクション
   const spaceDown = useRef(false);
+  const bgDown = useRef<(e: React.MouseEvent) => void>(() => {});
   const pc = useEditor((s) => s.device === 'pc');
   const pageH = useEditor((s) => currentPage(s).h);
   // ページの長さ（PC で設定したもの。なければ最初に見える範囲の高さ）。要素がはみ出せばその下端まで
@@ -121,6 +142,20 @@ export function Canvas() {
     const bottom = cr.top + r.b * zoomRef.current;
     if (bottom < wr.top + 20 || top > wr.bottom - 20) wrapRef.current.scrollTop += top - wr.top - 40;
   }, [selectedIds]);
+
+  // 選んだセクションが見えていなければ、上端が見える位置までスクロールする（追加・移動・構成パネルからの選択）
+  const sectionId = useEditor((s) => s.sectionId);
+  const sectionTop = useEditor((s) => {
+    const secs = currentPage(s).sections ?? [];
+    const i = secs.findIndex((x) => x.id === s.sectionId);
+    return i < 0 ? -1 : sectionTops(secs, sectionBase(s.site))[i];
+  });
+  useEffect(() => {
+    if (sectionTop < 0 || !wrapRef.current || !canvasRef.current) return;
+    const wr = wrapRef.current.getBoundingClientRect();
+    const top = canvasRef.current.getBoundingClientRect().top + sectionTop * zoomRef.current;
+    if (top < wr.top + 20 || top > wr.bottom - 120) wrapRef.current.scrollTo({ top: wrapRef.current.scrollTop + top - wr.top - 60, behavior: 'smooth' });
+  }, [sectionId, sectionTop]);
 
   // Ctrl + ホイールでズーム（マウス位置を中心に）
   const anchor = useRef<{ cx: number; cy: number; px: number; py: number } | null>(null);
@@ -199,6 +234,8 @@ export function Canvas() {
       const additive = e.shiftKey || e.ctrlKey || e.metaKey;
       const before = st.selectedIds;
       const wasSelected = before.includes(el.id);
+      // セクションの背景の帯は、空いている所と同じ扱い（クリックでセクションを選び、ドラッグで範囲選択）
+      if (!wasSelected && !el.locked && isSectionBand(st, el)) return bgDown.current(e);
       if (wasSelected) st.select(el.id, { keepGroup: true });
       else st.select(el.id, { toggle: additive });
 
@@ -269,6 +306,11 @@ export function Canvas() {
         if (!wasSelected) return;
         if (additive) {
           now.select(el.id, { toggle: true }); // 選択から外す
+          return;
+        }
+        // 1つだけ選んでいる要素をもう一度クリックすると、文字を書き換える
+        if (before.length === 1 && before[0] === el.id && !el.locked && INLINE_EDIT_TYPES.includes(el.type)) {
+          now.setTextEdit(el.id);
           return;
         }
         const group = el.group ? now.elements.filter((x) => x.group === el.group && !x.hidden).map((x) => x.id) : [el.id];
@@ -362,14 +404,31 @@ export function Canvas() {
       const p = toCanvas(ev.clientX, ev.clientY);
       const r = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) };
       setMarquee(r);
-      const hit = useEditor.getState().elements
+      const s = useEditor.getState();
+      const hit = s.elements
         .filter((el) => !el.hidden && el.x < r.x + r.w && el.x + el.w > r.x && el.y < r.y + r.h && el.y + el.h > r.y)
+        // セクションの背景の帯は、全体を囲んだときだけ選ぶ
+        .filter((el) => !isSectionBand(s, el) || (el.x >= r.x && el.x + el.w <= r.x + r.w && el.y >= r.y && el.y + el.h <= r.y + r.h))
         .map((el) => el.id);
-      useEditor.getState().selectMany([...new Set([...base, ...hit])]);
+      s.selectMany([...new Set([...base, ...hit])]);
     }, (moved) => {
       setMarquee(null);
-      if (!moved && !additive) useEditor.getState().select(null);
+      if (moved || additive) return;
+      // クリックだけなら、その位置のセクションを選ぶ（セクションの外なら選択を外す）
+      const s = useEditor.getState();
+      const at = sectionAt(s, start.y);
+      if (at && inside(start)) s.selectSection(at.sec.id);
+      else s.select(null);
     });
+  };
+  bgDown.current = onBackgroundDown;
+
+  // マウスが乗っているセクション（境目の「＋」や名前を出す）
+  const onHover = (e: React.MouseEvent) => {
+    const s = useEditor.getState();
+    const p = toCanvas(e.clientX, e.clientY);
+    const at = p.x >= -bleed && p.x <= frameW - bleed ? sectionAt(s, p.y) : null;
+    setSecHover(at ? at.i : -1);
   };
 
   const page = useEditor(currentPage);
@@ -392,6 +451,8 @@ export function Canvas() {
           }
         }}
         onMouseDown={onBackgroundDown}
+        onMouseMove={pc ? onHover : undefined}
+        onMouseLeave={() => setSecHover(-1)}
         onContextMenu={(e) => {
           e.preventDefault();
           const p = toCanvas(e.clientX, e.clientY);
@@ -456,7 +517,9 @@ export function Canvas() {
               </div>
             )}
             {pc && <PageEnd height={height} minH={minH} contentH={pageHeight(elements, 0)} zoom={zoom} />}
+            {pc && <SectionLayer hover={guides || marquee ? -1 : secHover} zoom={zoom} />}
             <SelectionBox onResize={selectionResizeDown} />
+            <ElementBar zoom={zoom} hidden={!!guides || !!marquee} />
             {guides?.v.map((x) => <div key={`v${x}`} className={styles.guideV} style={{ left: x }} />)}
             {guides?.h.map((y) => <div key={`h${y}`} className={styles.guideH} style={{ top: y }} />)}
             {guides?.gaps?.map((g, i) => (
@@ -508,11 +571,18 @@ function WidthHandles({ frameRef, left, width, height, viewW, shrink, userZoom }
 function PageEnd({ height, minH, contentH, zoom }: { height: number; minH: number; contentH: number; zoom: number }) {
   const page = useEditor(currentPage);
   const screenH = useEditor((s) => s.screen.h);
+  const last = page.sections?.[page.sections.length - 1];
   const onDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
     const start = height;
-    const { updatePage, commit } = useEditor.getState();
+    const { updatePage, resizeSection, commit } = useEditor.getState();
+    // セクションで組んだページは、最後のセクションの高さを変える（ページの長さはセクションの合計で決まる）
+    if (last) {
+      const startH = last.h;
+      trackDrag(e, (_dx, dy) => resizeSection(last.id, Math.round((startH + dy / zoom) / 10) * 10, false), (moved) => moved && commit());
+      return;
+    }
     trackDrag(e, (_dx, dy) => {
       const h = Math.round(Math.min(PAGE_H_MAX, Math.max(PAGE_H_MIN, start + dy / zoom)) / 10) * 10;
       updatePage(page.id, { h: h === screenH ? undefined : h }, false);
@@ -523,8 +593,8 @@ function PageEnd({ height, minH, contentH, zoom }: { height: number; minH: numbe
       className={styles.pageEnd}
       style={{ top: height }}
       onMouseDown={onDown}
-      onDoubleClick={() => useEditor.getState().updatePage(page.id, { h: undefined })}
-      title="ドラッグでページの長さを変更（ダブルクリックで元に戻す）"
+      onDoubleClick={() => !last && useEditor.getState().updatePage(page.id, { h: undefined })}
+      title={last ? `ドラッグで最後のセクション「${last.name}」の高さを変更` : 'ドラッグでページの長さを変更（ダブルクリックで元に戻す）'}
     >
       <span>ページの長さ {height}px{contentH >= minH ? '（要素の下端まで）' : ''} ↕</span>
     </div>

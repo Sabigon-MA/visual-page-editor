@@ -8,10 +8,12 @@ import { FIELD_NAME_RE, FORM_ACTION_RE, HREF_RE } from '../../parser/validate';
 import { boxTag, defaultTag, FIELD_TYPES } from '../../runtime/defaults';
 import { ITEM_HOVER_TYPES, navItems, navLinkKind, navText, newsItems, newsText, type NavItem, type NewsItem } from '../../runtime/styles';
 import { imageSize } from '../../utils/image';
+import { removeSectionWithToast } from '../Shell/editActions';
 import { insertImage } from '../Shell/fileActions';
 import { notFoundPage, PAGE_H_MAX, PAGE_H_MIN, pageBg, pageFile, pageTitle, slugError } from '../../model/pages';
 import { pageHeight } from '../../runtime/styles';
 import { themeColorId } from '../../model/theme';
+import { SECTION_H_MAX, SECTION_H_MIN, sectionBand, sectionBase, sectionMembers, sectionTops } from '../../model/pageSections';
 import { sharedKind } from '../../model/shared';
 import { currentPage, selectedElement, useEditor } from '../../store/elements';
 import type { BoxHover, PageElement, ThemeColor } from '../../types/element';
@@ -48,8 +50,9 @@ export function PropertiesPanel() {
   const update = useEditor((s) => s.update);
   const commit = useEditor((s) => s.commit);
   const colors = useEditor((s) => s.site.colors);
+  const sectionId = useEditor((s) => s.sectionId);
   if (count > 1) return <MultiSelection />;
-  if (!el) return <PageSettings />;
+  if (!el) return sectionId ? <SectionSettings id={sectionId} /> : <PageSettings />;
 
   const set = (patch: Partial<PageElement>, save = false) => update(el.id, patch, save);
   const colorName = (v: string) => colorLabel(v, colors);
@@ -66,27 +69,10 @@ export function PropertiesPanel() {
     <>
       <div className={styles.badge}>{typeLabel(el)}{el.locked ? '（ロック中）' : ''}</div>
       <ElementTools el={el} />
-      <div className={styles.section}>
-        <div className={styles.title}>位置とサイズ</div>
-        <Row label="X">{num('x', 0)}</Row>
-        <Row label="Y">{num('y', 0)}</Row>
-        <Row label="幅">{num('w', 20)}</Row>
-        <Row label="高さ">{num('h', 10)}</Row>
-        <Row label="回転">
-          <NumberField className={styles.input} value={el.rotate} min={-360} max={360} disabled={el.locked} onChange={(v) => set({ rotate: Math.round(v) })} onCommit={commit} />
-          <span className={styles.unit}>°</span>
-        </Row>
-      </div>
-
+      {/* よく変えるもの（文字・色）を上に、位置とサイズは畳んで下に置く */}
       {el.type === 'image' && <ImageSection el={el} />}
 
-      {FIELD_TYPES.includes(el.type) && <FieldSection el={el} />}
-
-      {el.type === 'nav' ? <NavSection el={el} /> : el.type === 'news' ? <NewsSection el={el} /> : <LinkSection el={el} />}
-
-      {!NO_HOVER_TYPES.includes(el.type) && <HoverSection el={el} />}
-
-      <SharedSection ids={[el.id]} />
+      <TextSection el={el} />
 
       <div className={styles.section}>
         <div className={styles.title}>スタイル</div>
@@ -123,6 +109,52 @@ export function PropertiesPanel() {
         </Row>
       </div>
 
+      {FIELD_TYPES.includes(el.type) && <FieldSection el={el} />}
+
+      {el.type === 'nav' ? <NavSection el={el} /> : el.type === 'news' ? <NewsSection el={el} /> : <LinkSection el={el} />}
+
+      {!NO_HOVER_TYPES.includes(el.type) && <HoverSection el={el} />}
+
+      <SharedSection ids={[el.id]} />
+
+      <Fold title="位置とサイズ" id="pos">
+        <Row label="X">{num('x', 0)}</Row>
+        <Row label="Y">{num('y', 0)}</Row>
+        <Row label="幅">{num('w', 20)}</Row>
+        <Row label="高さ">{num('h', 10)}</Row>
+        <Row label="回転">
+          <NumberField className={styles.input} value={el.rotate} min={-360} max={360} disabled={el.locked} onChange={(v) => set({ rotate: Math.round(v) })} onCommit={commit} />
+          <span className={styles.unit}>°</span>
+        </Row>
+      </Fold>
+    </>
+  );
+}
+
+// 畳める設定のまとまり（開いたかどうかは要素を選び直しても保つ）
+const folds: Record<string, boolean> = {};
+function Fold({ title, id, children }: { title: string; id: string; children: ReactNode }) {
+  const [open, setOpen] = useState(!!folds[id]);
+  return (
+    <div className={styles.section}>
+      <button
+        className={styles.foldTitle}
+        aria-expanded={open}
+        onClick={() => setOpen((folds[id] = !open))}
+      >
+        <span className={styles.foldMark}>{open ? '▾' : '▸'}</span>{title}
+      </button>
+      {open && children}
+    </div>
+  );
+}
+
+function TextSection({ el }: { el: PageElement }) {
+  const { update, commit } = useEditor.getState();
+  const colors = useEditor((s) => s.site.colors);
+  const set = (patch: Partial<PageElement>, save = false) => update(el.id, patch, save);
+  const colorName = (v: string) => colorLabel(v, colors);
+  return (
       <div className={styles.section}>
         <div className={styles.title}>テキスト</div>
         {!NO_TEXT_TYPES.includes(el.type) && el.type !== 'table' && (
@@ -156,7 +188,6 @@ export function PropertiesPanel() {
         )}
         {!NO_FONT_TYPES.includes(el.type) && <Typography el={el} />}
       </div>
-    </>
   );
 }
 
@@ -234,6 +265,72 @@ function colorLabel(v: string, colors: ThemeColor[]): string {
   return id ? colors.find((c) => c.id === id)?.name ?? v : v;
 }
 
+// セクションを選んでいるとき：名前・背景色・高さ・並び順
+function SectionSettings({ id }: { id: string }) {
+  const page = useEditor(currentPage);
+  const site = useEditor((s) => s.site);
+  const screenW = useEditor((s) => s.screen.w);
+  const sp = useEditor((s) => s.device === 'sp');
+  const sections = page.sections ?? [];
+  const i = sections.findIndex((s) => s.id === id);
+  const sec = sections[i];
+  const [name, setName] = useState(sec?.name ?? '');
+  useEffect(() => setName(sec?.name ?? ''), [id, sec?.name]);
+  if (!sec) return <PageSettings />;
+  const { renameSection, setSectionBg, resizeSection, moveSection, duplicateSection, setShared, commit, select } = useEditor.getState();
+  const top = sectionTops(sections, sectionBase(site))[i];
+  const band = sectionBand(page.elements, top, sec.h, screenW);
+  const count = sectionMembers(page.elements, sections, sectionBase(site))[i].length;
+  return (
+    <>
+      <div className={styles.badge}>セクション（{i + 1} / {sections.length}）</div>
+      <div className={styles.section}>
+        <div className={styles.title}>セクション</div>
+        <Row label="名前">
+          <TextField className={styles.input} value={name} onChange={setName} onCommit={() => (name.trim() ? renameSection(id, name) : setName(sec.name))} />
+        </Row>
+        <Row label="背景色">
+          <ColorPicker title="セクションの背景色" value={band?.bg ?? pageBg(page, site)} onChange={(bg) => setSectionBg(id, bg, false)} onCommit={commit} />
+          <span className={styles.colorName}>{band ? colorLabel(band.bg, site.colors) : 'ページと同じ'}</span>
+        </Row>
+        <Row label="高さ">
+          <NumberField className={styles.input} value={sec.h} min={SECTION_H_MIN} max={SECTION_H_MAX} disabled={sp} onChange={(v) => resizeSection(id, v, false)} onCommit={commit} />
+          <span className={styles.unit}>px</span>
+        </Row>
+        <div className={styles.hint}>中の要素の下端より短くはなりません。下のセクションも一緒にずれます</div>
+        <div className={styles.note}>{count}個の要素</div>
+      </div>
+      {sp ? (
+        <div className={styles.hint} style={{ marginLeft: 0 }}>セクションの並べ替え・複製・削除は PC の表示で行います</div>
+      ) : (
+        <>
+          <div className={styles.section}>
+            <div className={styles.title}>並び順</div>
+            <div className={styles.buttons} style={{ marginTop: 0 }}>
+              <button className={styles.btnGhost} disabled={i === 0} onClick={() => moveSection(id, i - 1)}>↑ 上へ</button>
+              <button className={styles.btnGhost} disabled={i === sections.length - 1} onClick={() => moveSection(id, i + 1)}>↓ 下へ</button>
+              <button className={styles.btnGhost} onClick={() => duplicateSection(id)} title="Ctrl+D">複製</button>
+              <button className={styles.btnGhost} style={{ color: 'var(--danger)' }} onClick={() => removeSectionWithToast(id)} title="Delete">削除</button>
+            </div>
+            <div className={styles.hint} style={{ marginLeft: 0, marginTop: 6 }}>左の「構成」でドラッグしても並べ替えられます</div>
+          </div>
+          <div className={styles.section}>
+            <div className={styles.title}>全ページ共通</div>
+            <div className={styles.buttons} style={{ marginTop: 0 }}>
+              <button className={styles.btnGhost} disabled={i !== 0} onClick={() => setShared('header')} title={i !== 0 ? '一番上のセクションだけヘッダーにできます' : undefined}>ヘッダーにする</button>
+              <button className={styles.btnGhost} disabled={i !== sections.length - 1} onClick={() => setShared('footer')} title={i !== sections.length - 1 ? '一番下のセクションだけフッターにできます' : undefined}>フッターにする</button>
+            </div>
+            <div className={styles.hint} style={{ marginLeft: 0, marginTop: 6 }}>すべてのページに同じものを表示します</div>
+          </div>
+        </>
+      )}
+      <div className={styles.buttons}>
+        <button className={styles.btnGhost} onClick={() => select(null)}>ページの設定を表示</button>
+      </div>
+    </>
+  );
+}
+
 // 要素を選んでいないとき：編集中のページの設定（名前・ファイル名・検索結果に出るタイトルと説明文）
 function PageSettings() {
   const page = useEditor(currentPage);
@@ -299,7 +396,13 @@ function PageSettings() {
           <span className={styles.colorName}>{page.bg ? colorLabel(page.bg, site.colors) : `サイト共通（${colorLabel(site.bg, site.colors)}）`}</span>
           {page.bg && <button className={styles.linkBtn} onClick={() => updatePage(page.id, { bg: undefined })} title="サイト共通の背景色に戻す">戻す</button>}
         </Row>
-        {pcView && (<>
+        {pcView && !!page.sections?.length && (
+          <>
+            <Row label="長さ"><span className={styles.static}>{length}px（{page.sections.length}個のセクション）</span></Row>
+            <div className={styles.hint}>セクションの高さの合計で決まります。セクションをクリックすると高さを変えられます</div>
+          </>
+        )}
+        {pcView && !page.sections?.length && (<>
         <Row label="長さ">
           <NumberField
             className={styles.input}

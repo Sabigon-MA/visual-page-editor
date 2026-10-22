@@ -36,6 +36,11 @@ export function parseProject(json: string): Project {
     if (typeof pg.bg === 'string' && pg.bg && SAFE_CSS.test(pg.bg)) meta.bg = pg.bg;
     if (typeof pg.form === 'string' && FORM_ACTION_RE.test(pg.form)) meta.form = pg.form;
     if (Number.isInteger(pg.h) && pg.h! >= PAGE_H_MIN && pg.h! <= PAGE_H_MAX) meta.h = pg.h;
+    // セクション（不正なものがあれば、セクションの情報がないものとして要素の配置から作り直す）
+    if (Array.isArray(pg.sections)) {
+      const ok = pg.sections.every((x) => x && typeof x.id === 'string' && /^[\w-]{1,40}$/.test(x.id) && typeof x.name === 'string' && Number.isInteger(x.h) && x.h > 0 && x.h <= PAGE_H_MAX);
+      if (ok && new Set(pg.sections.map((x) => x.id)).size === pg.sections.length) meta.sections = pg.sections.map((x) => ({ id: x.id, name: x.name.slice(0, 40), h: x.h }));
+    }
     return { id: pg.id, name, elements: elements as PageElement[], flow, ...meta };
   });
   const assets = parseAssets(p.assets);

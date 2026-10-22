@@ -9,15 +9,17 @@ import { ICONS } from '../Shell/icons';
 import shell from '../Shell/Shell.module.css';
 import { AddPanel } from './AddPanel';
 import { LayersPanel } from './LayersPanel';
+import { OutlinePanel } from './OutlinePanel';
 import styles from './Panels.module.css';
 import { ThemePanel } from './ThemePanel';
 
 export const DRAG_TYPE = 'application/x-vpe-element';
 const PAGE_DRAG = 'application/x-vpe-page';
 
-type SidePanel = 'add' | 'pages' | 'layers' | 'theme';
+type SidePanel = 'add' | 'outline' | 'pages' | 'layers' | 'theme';
 const RAIL: [SidePanel, string, string, string][] = [
   ['add', ICONS.plus, '追加', '要素やセクションを追加'],
+  ['outline', ICONS.section, '構成', '編集中のページのセクションの並び（選ぶ・並び替え・名前の変更）'],
   ['pages', ICONS.pages, 'ページ', 'ページの一覧（追加・並び替え・名前の変更）'],
   ['layers', ICONS.layers, 'レイヤー', '編集中のページの要素の一覧（重なり順・表示・ロック）'],
   ['theme', ICONS.palette, 'テーマ', 'サイト全体の配色'],
@@ -45,6 +47,7 @@ export function LeftSidebar() {
       {panel && (
         <aside className={shell.side}>
           {panel === 'add' && <Side title="追加"><AddPanel /></Side>}
+          {panel === 'outline' && <OutlineSide />}
           {panel === 'pages' && <PageList />}
           {panel === 'layers' && <LayersSide />}
           {panel === 'theme' && <Side title="テーマ"><ThemePanel /></Side>}
@@ -60,6 +63,15 @@ function Side({ title, extra, children }: { title: string; extra?: ReactNode; ch
       <div className={shell.sideHead}>{title}{extra}</div>
       {children}
     </>
+  );
+}
+
+function OutlineSide() {
+  const name = useEditor((s) => currentPage(s).name);
+  return (
+    <Side title="構成" extra={<span className={shell.sideHeadEnd}><small>{name}・上から順</small></span>}>
+      <OutlinePanel />
+    </Side>
   );
 }
 

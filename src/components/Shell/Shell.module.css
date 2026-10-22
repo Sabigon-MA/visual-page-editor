@@ -5,7 +5,8 @@
 .project{display:flex;align-items:center;gap:6px;height:30px;padding:0 8px;border:none;border-radius:7px;background:transparent;color:var(--text2);cursor:pointer;min-width:0;max-width:240px}
 .project:hover{background:var(--bg3);color:var(--text)}
 .projectName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dirty{width:6px;height:6px;border-radius:50%;background:#e0702f;flex-shrink:0}
+.saveState{flex-shrink:0;padding:1px 7px;border-radius:999px;background:var(--bg3);color:var(--text3);font-size:11px;white-space:nowrap}
+.dirty{background:#fbeadf;color:#b4531c}
 .icon{width:30px;height:30px;display:grid;place-items:center;border:none;border-radius:7px;background:transparent;color:var(--text2);cursor:pointer;flex-shrink:0}
 .icon:hover:not(:disabled){background:var(--bg3);color:var(--text)}
 .icon:disabled{opacity:.35;cursor:default}

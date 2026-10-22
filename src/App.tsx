@@ -12,6 +12,7 @@ import { StartScreen } from './components/Start/StartScreen';
 import { Timeline } from './components/Timeline/Timeline';
 import { TuneWorkspace } from './components/Tune/TuneWorkspace';
 import { WebTest } from './components/WebTest/WebTest';
+import { Toast } from './components/common/Toast';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useEditor } from './store/elements';
 import { useTune } from './tune/store';
@@ -81,6 +82,7 @@ export default function App() {
       <ContextMenu />
       <SiteSettingsDialog />
       <ConfirmDialog />
+      <Toast />
     </div>
   );
 }
