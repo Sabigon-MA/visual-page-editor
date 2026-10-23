@@ -61,6 +61,18 @@ npm run app:build  # インストーラーを作成（src-tauri/target/release/b
 
 デスクトップ版では、プロジェクトの保存・読み込みと書き出しに OS のファイルダイアログを使います（ブラウザ版はダウンロード）。保存の詳細は「[保存](#保存)」を参照してください。
 
+### CI・公開・リリース（GitHub Actions）
+
+| ワークフロー | いつ動くか | 内容 |
+|---|---|---|
+| `ci.yml` | main への push・PR | 型チェック・テスト・ビルド |
+| `pages.yml` | main への push | ブラウザ版を GitHub Pages に公開（https://sabigon-ma.github.io/visual-page-editor/） |
+| `release.yml` | `v*` タグの push | Windows のインストーラーを作り、GitHub Release の下書きに添付 |
+
+- ブラウザ版では、デスクトップ版だけの機能（既存サイトの見た目調整・最近使ったファイル）は使えません。プロジェクトはブラウザの中に自動保存されますが、消えることがあるので `.vpe` ファイルにも保存してください。
+- リリースするときは、`package.json`・`src-tauri/tauri.conf.json`・`src-tauri/Cargo.toml` のバージョンを揃えてから、同じ番号のタグ（例：`v0.2.0`）を push します。揃っていないとリリースは止まります。下書きの Release を確認して公開します。
+- インストーラーには署名がないため、初めて実行するときに Windows の SmartScreen の警告が出ます（「詳細情報」→「実行」で起動できます）。
+
 ## 使い方
 
 ### スタート画面
