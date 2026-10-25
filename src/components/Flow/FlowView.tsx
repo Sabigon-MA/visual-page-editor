@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { composePage } from '../../model/shared';
 import { elementName, externalLinks, pageBg, pageLinks, sharedPageLinks, unreachablePages, type LinkItem, type PageLink } from '../../model/pages';
 import { useEditor } from '../../store/elements';
-import type { Page, Screen } from '../../types/element';
+import type { Page, Screen, Site } from '../../types/element';
 import { trackDrag } from '../Canvas/interactions';
 import { PageThumb } from '../common/PageThumb';
 import { pageMenu } from '../ContextMenu/menus';
@@ -13,8 +13,6 @@ import styles from './FlowView.module.css';
 const HEAD_H = 30; // カードの見出しの高さ
 const THUMB_W = 220;
 const THUMB_H = 200;
-const SHARED_W = 200; // 共通メニューの札の幅
-const SHARED_ROW = 26; // 共通メニューの札の1行の高さ
 const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2];
 
 // サムネイルの縮尺とカードの大きさ
@@ -70,18 +68,35 @@ function curve(start: Point, to: Page, screen: Screen) {
   return { d: `M${start.x},${start.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${end.x},${end.y}`, start, mid };
 }
 
-// 共通メニューの札から、移動先のカードの上の辺へ（カードの列の上を通る）
-function sharedCurve(start: Point, to: Page, screen: Screen) {
-  const { w } = cardSize(screen);
-  const end = { x: to.flow.x + w / 2, y: to.flow.y };
-  const k = Math.max(50, Math.min(140, Math.abs(end.x - start.x) / 4));
-  return `M${start.x},${start.y} C${start.x + k},${start.y} ${end.x},${end.y - k} ${end.x},${end.y}`;
+// 共通メニュー（全ページのヘッダー・フッター）のリンク。どのページからも行けるので、
+// サイトマップのように最初のページから移動先のページへの線で表す（移動先ごとに1本）
+interface SharedLink {
+  to: string;
+  items: LinkItem[];
+}
+
+function sharedLinksOf(site: Site, pages: Page[]): SharedLink[] {
+  const out: SharedLink[] = [];
+  for (const it of sharedPageLinks(site, pages)) {
+    if (it.link === pages[0].id) continue;
+    const l = out.find((x) => x.to === it.link);
+    if (l) l.items.push(it);
+    else out.push({ to: it.link, items: [it] });
+  }
+  return out;
+}
+
+// 最初のページのカードの右の辺から、移動先のカードへ（始点は右の辺に等間隔に並べる）
+function sharedPath(i: number, n: number, pages: Page[], to: string, screen: Screen) {
+  const { w, th } = cardSize(screen);
+  const from = pages[0].flow;
+  return curve({ x: from.x + w, y: from.y + HEAD_H + ((i + 1) / (n + 1)) * th }, pages.find((p) => p.id === to)!, screen);
 }
 
 // 最初のページからリンクをたどった段数で列に分けて並べる
-function autoLayout(pages: Page[], screen: Screen): Record<string, Point> {
+function autoLayout(pages: Page[], site: Site, screen: Screen): Record<string, Point> {
   const { w, h } = cardSize(screen);
-  const links = pageLinks(pages);
+  const links = [...pageLinks(pages), ...sharedLinksOf(site, pages).map((l) => ({ from: pages[0].id, to: l.to }))];
   const level = new Map<string, number>([[pages[0].id, 0]]);
   const queue = [pages[0].id];
   while (queue.length) {
@@ -109,7 +124,7 @@ function autoLayout(pages: Page[], screen: Screen): Record<string, Point> {
 let savedZoom = 1;
 
 export function FlowView() {
-  const saved = useEditor((s) => s.pages);
+  const pages = useEditor((s) => s.pages);
   const screen = useEditor((s) => s.screen);
   const site = useEditor((s) => s.site);
   const pageId = useEditor((s) => s.pageId);
@@ -119,18 +134,12 @@ export function FlowView() {
   const wrap = useRef<HTMLDivElement>(null);
   const { w, h } = cardSize(screen);
 
-  // 共通メニュー（全ページのヘッダー・フッター）のリンクは、左端の札から矢印を引く。札の分だけページを右へずらして表示する
-  const shared = sharedPageLinks(site, saved);
-  // 共通メニューの矢印はカードの上を通すので、その分だけ下へもずらす
-  const offset = shared.length ? { x: SHARED_W + 100, y: 90 } : { x: 0, y: 0 };
-  const pages = shared.length ? saved.map((p) => ({ ...p, flow: { x: p.flow.x + offset.x, y: p.flow.y + offset.y } })) : saved;
-  const sharedPos = { x: 40, y: 40 + offset.y };
-  const sharedH = HEAD_H + shared.length * SHARED_ROW + 8;
-  const unreachable = unreachablePages(saved, site);
+  const shared = sharedLinksOf(site, pages);
+  const unreachable = unreachablePages(pages, site);
 
   const links = pageLinks(pages).filter((l) => l.from !== l.to);
-  const width = Math.max(...pages.map((p) => p.flow.x + w), sharedPos.x + SHARED_W) + 240;
-  const height = Math.max(...pages.map((p) => p.flow.y + h), sharedPos.y + sharedH) + 200;
+  const width = Math.max(...pages.map((p) => p.flow.x + w)) + 240;
+  const height = Math.max(...pages.map((p) => p.flow.y + h)) + 200;
   const { addPage, arrangeFlow, setPage, select, setView, setPanel } = useEditor.getState();
 
   // 全体が収まる拡大率
@@ -166,7 +175,7 @@ export function FlowView() {
     <div className={styles.wrap} ref={wrap}>
       <div className={styles.toolbar}>
         <button className={styles.tool} onClick={() => addPage(false)} title="ページを追加">＋ ページを追加</button>
-        <button className={styles.tool} onClick={() => arrangeFlow(autoLayout(saved, screen))} title="最初のページからリンクの順に左から右へ並べ直す">自動で並べる</button>
+        <button className={styles.tool} onClick={() => arrangeFlow(autoLayout(pages, site, screen))} title="最初のページからリンクの順に左から右へ並べ直す">自動で並べる</button>
         <span className={styles.zoom}>
           <button className={styles.zoomBtn} onClick={() => step(-1)} disabled={zoom <= 0.25} title="縮小（Ctrl + ホイール）">−</button>
           <button className={styles.zoomValue} onClick={() => setZoom(1)} title="100% に戻す">{Math.round(zoom * 100)}%</button>
@@ -175,7 +184,7 @@ export function FlowView() {
         </span>
         <span className={styles.legend}>
           <span className={styles.legendDot} />クリックで移動する要素 <span className={styles.legendArrow}>→</span> 移動先のページ
-          {shared.length > 0 && <><span className={styles.legendShared}>┄→</span> 共通メニューから</>}
+          {shared.length > 0 && <><span className={styles.legendShared}>┄→</span> 共通メニュー（全ページから行ける）</>}
         </span>
       </div>
       {links.length === 0 && shared.length === 0 && (
@@ -197,11 +206,9 @@ export function FlowView() {
               <path d="M0,0 L10,5 L0,10 z" fill="#0e9384" />
             </marker>
           </defs>
-          {shared.map((it, i) => {
-            const to = pages.find((p) => p.id === it.link)!;
-            const d = sharedCurve({ x: sharedPos.x + SHARED_W, y: sharedPos.y + HEAD_H + i * SHARED_ROW + SHARED_ROW / 2 }, to, screen);
-            return <path key={`shared-${i}`} d={d} className={styles.pathShared} markerEnd="url(#vpe-arrow-shared)" />;
-          })}
+          {shared.map((l, i) => (
+            <path key={`shared-${l.to}`} d={sharedPath(i, shared.length, pages, l.to, screen).d} className={styles.pathShared} markerEnd="url(#vpe-arrow-shared)" />
+          ))}
           {links.map((l) => {
             const key = `${l.from}:${l.el.id}`;
             const a = arrowPath(l, pages, screen);
@@ -214,21 +221,10 @@ export function FlowView() {
             );
           })}
         </svg>
-        {shared.length > 0 && (
-          <div className={styles.shared} style={{ left: sharedPos.x, top: sharedPos.y, width: SHARED_W }}>
-            <div className={styles.sharedHead} style={{ height: HEAD_H }}>共通メニュー（全ページ）</div>
-            {shared.map((it, i) => (
-              <div key={i} className={styles.sharedRow} style={{ height: SHARED_ROW }} title={`${elementName(it.el)}：${it.label} → ${pages.find((p) => p.id === it.link)?.name}`}>
-                {it.label}
-              </div>
-            ))}
-          </div>
-        )}
         {pages.map((p, i) => (
           <FlowCard
             key={p.id}
             page={p}
-            offset={offset}
             zoom={zoom}
             first={i === 0}
             active={p.id === pageId}
@@ -254,6 +250,20 @@ export function FlowView() {
             </button>
           );
         })}
+        {shared.map((l, i) => {
+          const a = sharedPath(i, shared.length, pages, l.to, screen);
+          return (
+            <button
+              key={`shared-${l.to}`}
+              className={`${styles.label} ${styles.labelShared}`}
+              style={{ left: a.mid.x, top: a.mid.y }}
+              title={`共通メニュー（全ページから行ける）：${l.items.map((it) => it.label).join('・')}\nクリックでこのメニューを選択して編集`}
+              onClick={() => openLink({ from: pages[0].id, to: l.to, el: l.items[0].el })}
+            >
+              {l.items.map((it) => it.label).join('・')}
+            </button>
+          );
+        })}
       </div>
       </div>
     </div>
@@ -261,8 +271,7 @@ export function FlowView() {
 }
 
 interface FlowCardProps {
-  page: Page; // flow は表示する位置（offset だけずらしたもの）
-  offset: Point;
+  page: Page;
   zoom: number;
   first: boolean;
   active: boolean;
@@ -271,7 +280,7 @@ interface FlowCardProps {
   screen: Screen;
 }
 
-const FlowCard = memo(function FlowCard({ page, offset, zoom, first, active, unreachable, external, screen }: FlowCardProps) {
+const FlowCard = memo(function FlowCard({ page, zoom, first, active, unreachable, external, screen }: FlowCardProps) {
   const site = useEditor((s) => s.site);
   const openMenu = useMenu((m) => m.open);
   const [renaming, setRenaming] = useState(false);
@@ -290,7 +299,7 @@ const FlowCard = memo(function FlowCard({ page, offset, zoom, first, active, unr
         if (e.button !== 0 || renaming) return;
         e.stopPropagation();
         const { x, y } = page.flow;
-        trackDrag(e, (dx, dy) => useEditor.getState().moveFlow(page.id, { x: x - offset.x + dx / zoom, y: y - offset.y + dy / zoom }), (moved) => {
+        trackDrag(e, (dx, dy) => useEditor.getState().moveFlow(page.id, { x: x + dx / zoom, y: y + dy / zoom }), (moved) => {
           if (moved) useEditor.getState().commit();
           else useEditor.getState().setPage(page.id);
         });
