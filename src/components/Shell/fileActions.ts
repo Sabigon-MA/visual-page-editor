@@ -16,11 +16,45 @@ import { IMAGE_EXTS, loadImage, mimeOf } from '../../utils/image';
 import { choiceDialog, confirmDialog } from '../Dialog/confirm';
 import { toast } from '../common/Toast';
 
-// デスクトップ版（Tauri）では OS のダイアログでパスを選んで直接書き込む。ブラウザ版はダウンロード。
+// デスクトップ版（Tauri）では OS のダイアログでパスを選んで直接書き込む。
+// ブラウザ版も保存先を選んで書き込む（File System Access API。Chrome・Edge）。使えないブラウザはダウンロード。
 export const desktop = isTauri();
 
 const EXT = 'vpe';
 const PROJECT_FILTER = { name: 'visual-page-editor プロジェクト', extensions: [EXT, 'json'] };
+const PROJECT_TYPE = 'application/json';
+
+type FileFilter = { name: string; extensions: string[] };
+type PickerTypes = { types: { description: string; accept: Record<string, string[]> }[] };
+type PickerWindow = Window & {
+  showSaveFilePicker?(opts: PickerTypes & { suggestedName?: string }): Promise<FileSystemFileHandle>;
+  showOpenFilePicker?(opts: PickerTypes & { multiple?: boolean }): Promise<FileSystemFileHandle[]>;
+};
+const picker = (typeof window === 'undefined' ? {} : window) as PickerWindow;
+
+// ブラウザ版で開いている・保存したプロジェクトファイル（上書き保存先。ページを読み込み直すと忘れる）
+let projectHandle: FileSystemFileHandle | null = null;
+
+const pickerTypes = (filter: FileFilter, type: string): PickerTypes => ({
+  types: [{ description: filter.name, accept: { [type.split(';')[0]]: filter.extensions.map((e) => `.${e}`) } }],
+});
+
+// 保存先を選ぶ。キャンセルしたら null、保存先を選べないブラウザなら undefined
+async function pickSaveFile(name: string, filter: FileFilter, type: string): Promise<FileSystemFileHandle | null | undefined> {
+  if (!picker.showSaveFilePicker) return undefined;
+  try {
+    return await picker.showSaveFilePicker({ suggestedName: name, ...pickerTypes(filter, type) });
+  } catch (e) {
+    if ((e as DOMException).name === 'AbortError') return null;
+    throw e;
+  }
+}
+
+async function writeHandle(handle: FileSystemFileHandle, data: Uint8Array | string) {
+  const w = await handle.createWritable();
+  await w.write(data as FileSystemWriteChunkType);
+  await w.close();
+}
 
 export const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
@@ -33,8 +67,20 @@ async function showError(title: string, e: unknown) {
   await confirmDialog({ title, message: e instanceof Error ? e.message : String(e), ok: '閉じる' });
 }
 
-async function saveBytes(name: string, data: Uint8Array | string, type: string, filter: { name: string; extensions: string[] }) {
+async function saveBytes(name: string, data: Uint8Array | string, type: string, filter: FileFilter) {
   if (!desktop) {
+    try {
+      const handle = await pickSaveFile(name, filter, type);
+      if (handle === null) return;
+      if (handle) {
+        await writeHandle(handle, data);
+        toast(`「${handle.name}」に書き出しました`);
+        return;
+      }
+    } catch (e) {
+      await showError('書き出せませんでした', e);
+      return;
+    }
     saveAs(new Blob([data as BlobPart], { type }), name);
     toast(`「${name}」を書き出しました`);
     return;
@@ -66,14 +112,24 @@ export function exportZip(format: CodeFormat = useEditor.getState().codeFormat) 
   void saveBytes(`craft-export-${format}.zip`, data, 'application/zip', { name: 'zip', extensions: ['zip'] });
 }
 
-// 上書き保存。デスクトップ版で保存先が決まっていなければ「名前を付けて保存」になる。保存できたら true。
+// 上書き保存。保存先が決まっていなければ「名前を付けて保存」になる。保存できたら true。
 export async function saveProjectFile(): Promise<boolean> {
+  if (!desktop) return projectHandle ? writeProjectHandle(projectHandle) : saveProjectFileAs();
   const path = useEditor.getState().filePath;
-  return desktop && path ? writeProject(path) : saveProjectFileAs();
+  return path ? writeProject(path) : saveProjectFileAs();
 }
 
 export async function saveProjectFileAs(): Promise<boolean> {
   if (!desktop) {
+    let handle: FileSystemFileHandle | null | undefined;
+    try {
+      handle = await pickSaveFile(projectHandle?.name ?? `project.${EXT}`, PROJECT_FILTER, PROJECT_TYPE);
+    } catch (e) {
+      await showError('保存できませんでした', e);
+      return false;
+    }
+    if (handle === null) return false;
+    if (handle) return writeProjectHandle(handle);
     const json = serializeProject(projectOf(useEditor.getState()));
     saveAs(new Blob([json], { type: 'application/json;charset=utf-8' }), `project.${EXT}`);
     useEditor.getState().markSaved(null);
@@ -86,6 +142,19 @@ export async function saveProjectFileAs(): Promise<boolean> {
     return path ? await writeProject(path) : false;
   } catch (e) {
     await showError('保存できませんでした', e);
+    return false;
+  }
+}
+
+async function writeProjectHandle(handle: FileSystemFileHandle): Promise<boolean> {
+  try {
+    await writeHandle(handle, serializeProject(projectOf(useEditor.getState())));
+    projectHandle = handle;
+    useEditor.getState().markSaved(null);
+    toast(`「${handle.name}」に保存しました`);
+    return true;
+  } catch (e) {
+    await showError(`「${handle.name}」に保存できませんでした`, e);
     return false;
   }
 }
@@ -120,14 +189,17 @@ export async function askSaveChanges(): Promise<boolean> {
 // ページの幅は PC の標準の幅（書き出したページは画面の幅に合わせて伸び縮みし、スマホ用のレイアウトも作る）
 export async function newProject(template?: SiteTemplate) {
   if (!(await askSaveChanges())) return;
+  projectHandle = null;
   if (template) useEditor.getState().loadProject(buildTemplate(template, DEFAULT_SCREEN));
   else useEditor.getState().newProject(DEFAULT_SCREEN);
 }
 
-async function loadProjectText(name: string, read: () => Promise<string>, path: string | null) {
+// handle はブラウザ版で開いたファイル（上書き保存先にする）
+async function loadProjectText(name: string, read: () => Promise<string>, path: string | null, handle: FileSystemFileHandle | null = null) {
   try {
     const project = parseProject(await read());
     if (!(await askSaveChanges())) return;
+    projectHandle = handle;
     useEditor.getState().loadProject(project, path);
     if (path) useRecent.getState().add(path);
   } catch (e) {
@@ -150,6 +222,20 @@ export function openProjectFile() {
     void (async () => {
       const path = await openDialog({ multiple: false, directory: false, filters: [PROJECT_FILTER] });
       if (path) await loadProjectText(baseName(path), () => readTextFile(path), path);
+    })();
+    return;
+  }
+  if (picker.showOpenFilePicker) {
+    void (async () => {
+      let handle: FileSystemFileHandle;
+      try {
+        [handle] = await picker.showOpenFilePicker!({ multiple: false, ...pickerTypes(PROJECT_FILTER, PROJECT_TYPE) });
+      } catch (e) {
+        if ((e as DOMException).name !== 'AbortError') await showError('プロジェクトを開けませんでした', e);
+        return;
+      }
+      const file = await handle.getFile();
+      await loadProjectText(file.name, () => file.text(), null, handle);
     })();
     return;
   }
