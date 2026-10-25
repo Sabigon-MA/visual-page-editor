@@ -1,6 +1,6 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { composePage } from '../../model/shared';
-import { elementName, pageBg, pageLinks, type PageLink } from '../../model/pages';
+import { elementName, externalLinks, pageBg, pageLinks, sharedPageLinks, unreachablePages, type LinkItem, type PageLink } from '../../model/pages';
 import { useEditor } from '../../store/elements';
 import type { Page, Screen } from '../../types/element';
 import { trackDrag } from '../Canvas/interactions';
@@ -13,6 +13,9 @@ import styles from './FlowView.module.css';
 const HEAD_H = 30; // カードの見出しの高さ
 const THUMB_W = 220;
 const THUMB_H = 200;
+const SHARED_W = 200; // 共通メニューの札の幅
+const SHARED_ROW = 26; // 共通メニューの札の1行の高さ
+const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2];
 
 // サムネイルの縮尺とカードの大きさ
 function cardSize(screen: Screen) {
@@ -29,14 +32,19 @@ interface Point {
 
 // リンクの矢印：要素の位置（サムネイル上）から、移動先のカードの辺へ
 function arrowPath(link: PageLink, pages: Page[], screen: Screen) {
-  const { s, tw, w, h } = cardSize(screen);
+  const { s, tw, w } = cardSize(screen);
   const from = pages.find((p) => p.id === link.from)!;
-  const to = pages.find((p) => p.id === link.to)!;
   const el = link.el;
   const start: Point = {
     x: from.flow.x + (w - tw) / 2 + (el.x + el.w / 2) * s,
     y: from.flow.y + HEAD_H + Math.min(el.y + el.h / 2, screen.h) * s,
   };
+  return curve(start, pages.find((p) => p.id === link.to)!, screen);
+}
+
+// 点から移動先のカードの辺への曲線
+function curve(start: Point, to: Page, screen: Screen) {
+  const { w, h } = cardSize(screen);
   const c = { x: to.flow.x + w / 2, y: to.flow.y + h / 2 };
   const dx = c.x - start.x;
   const dy = c.y - start.y;
@@ -60,6 +68,14 @@ function arrowPath(link: PageLink, pages: Page[], screen: Screen) {
     y: u * u * u * start.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * end.y,
   };
   return { d: `M${start.x},${start.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${end.x},${end.y}`, start, mid };
+}
+
+// 共通メニューの札から、移動先のカードの上の辺へ（カードの列の上を通る）
+function sharedCurve(start: Point, to: Page, screen: Screen) {
+  const { w } = cardSize(screen);
+  const end = { x: to.flow.x + w / 2, y: to.flow.y };
+  const k = Math.max(50, Math.min(140, Math.abs(end.x - start.x) / 4));
+  return `M${start.x},${start.y} C${start.x + k},${start.y} ${end.x},${end.y - k} ${end.x},${end.y}`;
 }
 
 // 最初のページからリンクをたどった段数で列に分けて並べる
@@ -89,16 +105,55 @@ function autoLayout(pages: Page[], screen: Screen): Record<string, Point> {
   return out;
 }
 
+// 図の拡大率（画面遷移図を開き直しても保つ）
+let savedZoom = 1;
+
 export function FlowView() {
-  const pages = useEditor((s) => s.pages);
+  const saved = useEditor((s) => s.pages);
   const screen = useEditor((s) => s.screen);
+  const site = useEditor((s) => s.site);
   const pageId = useEditor((s) => s.pageId);
   const [hoverLink, setHoverLink] = useState<string | null>(null);
+  const [zoom, setZoomState] = useState(savedZoom);
+  const setZoom = (z: number) => setZoomState((savedZoom = Math.min(2, Math.max(0.25, Math.round(z * 100) / 100))));
+  const wrap = useRef<HTMLDivElement>(null);
   const { w, h } = cardSize(screen);
+
+  // 共通メニュー（全ページのヘッダー・フッター）のリンクは、左端の札から矢印を引く。札の分だけページを右へずらして表示する
+  const shared = sharedPageLinks(site, saved);
+  // 共通メニューの矢印はカードの上を通すので、その分だけ下へもずらす
+  const offset = shared.length ? { x: SHARED_W + 100, y: 90 } : { x: 0, y: 0 };
+  const pages = shared.length ? saved.map((p) => ({ ...p, flow: { x: p.flow.x + offset.x, y: p.flow.y + offset.y } })) : saved;
+  const sharedPos = { x: 40, y: 40 + offset.y };
+  const sharedH = HEAD_H + shared.length * SHARED_ROW + 8;
+  const unreachable = unreachablePages(saved, site);
+
   const links = pageLinks(pages).filter((l) => l.from !== l.to);
-  const width = Math.max(...pages.map((p) => p.flow.x + w)) + 240;
-  const height = Math.max(...pages.map((p) => p.flow.y + h)) + 200;
+  const width = Math.max(...pages.map((p) => p.flow.x + w), sharedPos.x + SHARED_W) + 240;
+  const height = Math.max(...pages.map((p) => p.flow.y + h), sharedPos.y + sharedH) + 200;
   const { addPage, arrangeFlow, setPage, select, setView, setPanel } = useEditor.getState();
+
+  // 全体が収まる拡大率
+  const fit = () => {
+    const el = wrap.current;
+    if (!el) return;
+    const bar = el.firstElementChild?.getBoundingClientRect().height ?? 0;
+    setZoom(Math.min(1, (el.clientWidth - 24) / width, (el.clientHeight - bar - 24) / height));
+  };
+  const step = (dir: 1 | -1) => setZoom(dir > 0 ? (ZOOMS.find((z) => z > zoom + 0.001) ?? 2) : ([...ZOOMS].reverse().find((z) => z < zoom - 0.001) ?? 0.25));
+
+  // Ctrl + ホイールで拡大・縮小（ページ全体の拡大を止めるため、passive でないリスナーにする）
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom(savedZoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   const openLink = (l: PageLink) => {
     setView('canvas');
@@ -108,20 +163,28 @@ export function FlowView() {
   };
 
   return (
-    <div className={styles.wrap}>
+    <div className={styles.wrap} ref={wrap}>
       <div className={styles.toolbar}>
         <button className={styles.tool} onClick={() => addPage(false)} title="ページを追加">＋ ページを追加</button>
-        <button className={styles.tool} onClick={() => arrangeFlow(autoLayout(pages, screen))} title="最初のページからリンクの順に左から右へ並べ直す">自動で並べる</button>
+        <button className={styles.tool} onClick={() => arrangeFlow(autoLayout(saved, screen))} title="最初のページからリンクの順に左から右へ並べ直す">自動で並べる</button>
+        <span className={styles.zoom}>
+          <button className={styles.zoomBtn} onClick={() => step(-1)} disabled={zoom <= 0.25} title="縮小（Ctrl + ホイール）">−</button>
+          <button className={styles.zoomValue} onClick={() => setZoom(1)} title="100% に戻す">{Math.round(zoom * 100)}%</button>
+          <button className={styles.zoomBtn} onClick={() => step(1)} disabled={zoom >= 2} title="拡大（Ctrl + ホイール）">＋</button>
+          <button className={styles.tool} onClick={fit} title="すべてのページが見えるように縮める">全体を表示</button>
+        </span>
         <span className={styles.legend}>
           <span className={styles.legendDot} />クリックで移動する要素 <span className={styles.legendArrow}>→</span> 移動先のページ
+          {shared.length > 0 && <><span className={styles.legendShared}>┄→</span> 共通メニューから</>}
         </span>
       </div>
-      {links.length === 0 && (
+      {links.length === 0 && shared.length === 0 && (
         <div className={styles.hint}>
           まだ画面遷移がありません。キャンバスで要素を選び、右パネルの「リンク」で移動先のページを設定すると、ここに矢印で表示されます。
         </div>
       )}
-      <div className={styles.board} style={{ width, height }}>
+      <div style={{ width: width * zoom, height: height * zoom }}>
+      <div className={styles.board} style={{ width, height, transform: `scale(${zoom})`, transformOrigin: '0 0' }}>
         <svg className={styles.arrows} width={width} height={height}>
           <defs>
             <marker id="vpe-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -130,7 +193,15 @@ export function FlowView() {
             <marker id="vpe-arrow-hl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" fill="#ff3d71" />
             </marker>
+            <marker id="vpe-arrow-shared" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="#0e9384" />
+            </marker>
           </defs>
+          {shared.map((it, i) => {
+            const to = pages.find((p) => p.id === it.link)!;
+            const d = sharedCurve({ x: sharedPos.x + SHARED_W, y: sharedPos.y + HEAD_H + i * SHARED_ROW + SHARED_ROW / 2 }, to, screen);
+            return <path key={`shared-${i}`} d={d} className={styles.pathShared} markerEnd="url(#vpe-arrow-shared)" />;
+          })}
           {links.map((l) => {
             const key = `${l.from}:${l.el.id}`;
             const a = arrowPath(l, pages, screen);
@@ -143,8 +214,28 @@ export function FlowView() {
             );
           })}
         </svg>
+        {shared.length > 0 && (
+          <div className={styles.shared} style={{ left: sharedPos.x, top: sharedPos.y, width: SHARED_W }}>
+            <div className={styles.sharedHead} style={{ height: HEAD_H }}>共通メニュー（全ページ）</div>
+            {shared.map((it, i) => (
+              <div key={i} className={styles.sharedRow} style={{ height: SHARED_ROW }} title={`${elementName(it.el)}：${it.label} → ${pages.find((p) => p.id === it.link)?.name}`}>
+                {it.label}
+              </div>
+            ))}
+          </div>
+        )}
         {pages.map((p, i) => (
-          <FlowCard key={p.id} page={p} first={i === 0} active={p.id === pageId} screen={screen} />
+          <FlowCard
+            key={p.id}
+            page={p}
+            offset={offset}
+            zoom={zoom}
+            first={i === 0}
+            active={p.id === pageId}
+            unreachable={unreachable.has(p.id)}
+            external={externalLinks(p.elements)}
+            screen={screen}
+          />
         ))}
         {links.map((l) => {
           const key = `${l.from}:${l.el.id}`;
@@ -164,11 +255,23 @@ export function FlowView() {
           );
         })}
       </div>
+      </div>
     </div>
   );
 }
 
-const FlowCard = memo(function FlowCard({ page, first, active, screen }: { page: Page; first: boolean; active: boolean; screen: Screen }) {
+interface FlowCardProps {
+  page: Page; // flow は表示する位置（offset だけずらしたもの）
+  offset: Point;
+  zoom: number;
+  first: boolean;
+  active: boolean;
+  unreachable: boolean;
+  external: LinkItem[];
+  screen: Screen;
+}
+
+const FlowCard = memo(function FlowCard({ page, offset, zoom, first, active, unreachable, external, screen }: FlowCardProps) {
   const site = useEditor((s) => s.site);
   const openMenu = useMenu((m) => m.open);
   const [renaming, setRenaming] = useState(false);
@@ -180,14 +283,14 @@ const FlowCard = memo(function FlowCard({ page, first, active, screen }: { page:
   };
   return (
     <div
-      className={`${styles.card} ${active ? styles.cardActive : ''}`}
+      className={`${styles.card} ${active ? styles.cardActive : ''} ${unreachable ? styles.cardUnreachable : ''}`}
       style={{ left: page.flow.x, top: page.flow.y, width: w }}
       data-page={page.id}
       onMouseDown={(e) => {
         if (e.button !== 0 || renaming) return;
         e.stopPropagation();
         const { x, y } = page.flow;
-        trackDrag(e, (dx, dy) => useEditor.getState().moveFlow(page.id, { x: x + dx, y: y + dy }), (moved) => {
+        trackDrag(e, (dx, dy) => useEditor.getState().moveFlow(page.id, { x: x - offset.x + dx / zoom, y: y - offset.y + dy / zoom }), (moved) => {
           if (moved) useEditor.getState().commit();
           else useEditor.getState().setPage(page.id);
         });
@@ -218,6 +321,20 @@ const FlowCard = memo(function FlowCard({ page, first, active, screen }: { page:
         <PageThumb elements={composePage(page.elements, site, screen).elements} screen={screen} width={tw} bg={pageBg(page, site)} />
         {page.elements.length === 0 && <div className={styles.emptyThumb}>要素なし</div>}
       </div>
+      {(unreachable || external.length > 0) && (
+        <div className={styles.badges}>
+          {unreachable && (
+            <span className={styles.badgeWarn} title="最初のページから、ボタンやメニューのリンクをたどってもこのページに来られません">
+              ! どこからもリンクされていません
+            </span>
+          )}
+          {external.length > 0 && (
+            <span className={styles.badgeExt} title={external.map((it) => `${it.label} → ${it.link}`).join('\n')}>
+              ↗ 外部リンク {external.length}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 });
