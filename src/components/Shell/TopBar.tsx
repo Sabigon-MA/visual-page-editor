@@ -6,7 +6,7 @@ import { useMenu } from '../ContextMenu/menuStore';
 import {
   baseName, desktop, exportHTML, exportSite, exportZip, newProject, openProjectFile, openProjectPath, projectName, saveProjectFile, saveProjectFileAs,
 } from './fileActions';
-import { ICONS } from './icons';
+import { APP_ICON, ICONS } from './icons';
 import styles from './Shell.module.css';
 
 // ボタンの下にメニューを開く
@@ -70,7 +70,7 @@ export function TopBar() {
 
   return (
     <header className={styles.top}>
-      <div className={styles.brand}><span className={styles.mark}>P</span>PageEdit</div>
+      <div className={styles.brand}><img className={styles.mark} src={APP_ICON} alt="" />PageEdit</div>
       <button className={styles.project} title={`${filePath ?? (desktop ? 'まだ保存していません' : 'ブラウザに自動保存しています')}\nクリックで新規作成・開く・保存`} onClick={(e) => openBelow(e, fileMenu())}>
         <span className={styles.projectName}>{projectName(filePath)}</span>
         <span className={`${styles.saveState} ${dirty ? styles.dirty : ''}`} title={dirty ? '保存していない変更があります（Ctrl+S で保存）' : '最後に保存したときのままです'}>
