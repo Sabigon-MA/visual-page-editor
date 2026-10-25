@@ -3,7 +3,7 @@ import { closeTune, saveTune, startTune } from '../../tune/actions';
 import { rgbToHex } from '../../tune/overrides';
 import { commit, isTuneDirty, redo, setProp, setRules, undo, useTune, type Inspected, type Picked } from '../../tune/store';
 import { baseName } from '../Shell/fileActions';
-import { ICONS } from '../Shell/icons';
+import { APP_ICON, ICONS } from '../Shell/icons';
 import { ColorField, Icon } from '../common/Fields';
 import styles from './Tune.module.css';
 
@@ -174,7 +174,7 @@ export function TuneWorkspace() {
   return (
     <div className={styles.app}>
       <header className={styles.top}>
-        <div className={styles.brand}><span className={styles.mark}>P</span>見た目の調整</div>
+        <div className={styles.brand}><img className={styles.mark} src={APP_ICON} alt="" />見た目の調整</div>
         <span className={styles.project} title={s.dir}>{baseName(s.dir)}{dirty && <i className={styles.dirty} title="保存していない変更があります" />}</span>
         <span className={styles.sep} />
         <button className={`${styles.btn} ${s.pick ? styles.btnOn : ''}`} onClick={() => useTune.setState({ pick: !s.pick })} title="オンのときは、ページをクリックすると要素を選びます。オフにすると、ページを普通に操作できます">

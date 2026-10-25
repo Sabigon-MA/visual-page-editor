@@ -1,3 +1,6 @@
+// アプリのアイコン（public/favicon.svg。元データは src-tauri/icons/icon.svg）
+export const APP_ICON = `${import.meta.env.BASE_URL}favicon.svg`;
+
 // アイコン（16×16 の SVG パス。大きく表示するときは拡大する）
 export const ICONS = {
   save: '<path d="M2.5 2.5h9l2 2v9h-11z"/><path d="M5 2.5v3.5h5V2.5M5 13.5V9h6v4.5"/>',

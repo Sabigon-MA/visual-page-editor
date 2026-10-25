@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- アプリのアイコンの元データ。各サイズの PNG・ico・icns はここから作る（npx tauri icon） -->
+  <!-- 粘土でできた Web ページ：ブラウザのバーと色のセクション。右上の角をつまんで引っぱり出している -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f2ff"/><stop offset="1" stop-color="#fff0e8"/></linearGradient>
+    <clipPath id="page"><path d="M42 26 H84 C94 26 98 28 101 21 C104 13 115 12 117 20 C119 28 110 35 103 40 V88 C103 98 96 106 86 106 H42 C32 106 25 98 25 88 V44 C25 34 32 26 42 26 Z"/></clipPath>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
+    <!-- 粘土の質感：右下の縁に内側の影、左上の縁にハイライトを入れて、ふっくら見せる -->
+    <filter id="clay" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2.6" result="b"/>
+      <feOffset in="b" dx="-2.4" dy="-2.4" result="up"/>
+      <feComposite in="SourceAlpha" in2="up" operator="out" result="rimDark"/>
+      <feFlood flood-color="#2b1650" flood-opacity=".34"/>
+      <feComposite in2="rimDark" operator="in" result="shade"/>
+      <feOffset in="b" dx="2" dy="2" result="down"/>
+      <feComposite in="SourceAlpha" in2="down" operator="out" result="rimLight"/>
+      <feFlood flood-color="#fff" flood-opacity=".7"/>
+      <feComposite in2="rimLight" operator="in" result="light"/>
+      <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="shade"/><feMergeNode in="light"/></feMerge>
+      <feComposite in2="SourceAlpha" operator="in"/>
+    </filter>
+    <!-- 小さい粒用（影とハイライトを細くする） -->
+    <filter id="clay-sm" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1" result="b"/>
+      <feOffset in="b" dx="-.9" dy="-.9" result="up"/>
+      <feComposite in="SourceAlpha" in2="up" operator="out" result="rimDark"/>
+      <feFlood flood-color="#2b1650" flood-opacity=".3"/>
+      <feComposite in2="rimDark" operator="in" result="shade"/>
+      <feOffset in="b" dx=".7" dy=".7" result="down"/>
+      <feComposite in="SourceAlpha" in2="down" operator="out" result="rimLight"/>
+      <feFlood flood-color="#fff" flood-opacity=".6"/>
+      <feComposite in2="rimLight" operator="in" result="light"/>
+      <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="shade"/><feMergeNode in="light"/></feMerge>
+      <feComposite in2="SourceAlpha" operator="in"/>
+    </filter>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bg)"/>
+  <g transform="translate(-5 -3) scale(1.08)">
+    <ellipse cx="64" cy="109" rx="38" ry="5" fill="#3a2a70" opacity=".22" filter="url(#shadow)"/>
+    <g filter="url(#clay)">
+      <g clip-path="url(#page)">
+        <rect width="128" height="128" fill="#ff6f9c"/>
+        <path d="M0 0 H128 V39 H0 Z" fill="#7b5cff"/>
+        <path d="M0 39 H128 V69 C104 73 86 65 64 69 S22 72 0 67 Z" fill="#ffb240"/>
+        <path d="M0 67 C22 72 42 73 64 69 S104 73 128 69 V92 C100 95 84 89 62 92 S20 94 0 90 Z" fill="#25c9aa"/>
+      </g>
+    </g>
+    <g filter="url(#clay-sm)"><circle cx="33" cy="32.5" r="3" fill="#ff6f9c"/><circle cx="41" cy="32.5" r="3" fill="#ffd84a"/><circle cx="49" cy="32.5" r="3" fill="#25c9aa"/></g>
+    <rect x="55" y="30" width="34" height="5" rx="2.5" fill="#fff" opacity=".5"/>
+    <g fill="none" stroke="#fff" stroke-linecap="round">
+      <path d="M34 47 H70" stroke-width="4.5" stroke-opacity=".9"/>
+      <path d="M34 54 H60" stroke-width="2.6" stroke-opacity=".65"/>
+      <path d="M34 99 H58" stroke-width="2.4" stroke-opacity=".6"/>
+    </g>
+    <g filter="url(#clay)"><rect x="34" y="58.5" width="19" height="7" rx="3.5" fill="#fff6ec"/></g>
+    <g filter="url(#clay)"><circle cx="86" cy="54" r="8.5" fill="#ff6f9c"/></g>
+    <g filter="url(#clay)"><rect x="33" y="75" width="18" height="12" rx="3" fill="#e4fff8"/><rect x="55" y="75" width="18" height="12" rx="3" fill="#e4fff8"/><rect x="77" y="75" width="18" height="12" rx="3" fill="#e4fff8"/></g>
+  </g>
+</svg>

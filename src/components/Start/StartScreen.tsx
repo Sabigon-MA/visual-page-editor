@@ -10,7 +10,7 @@ import { openTuneFolder } from '../../tune/actions';
 import { Icon } from '../common/Fields';
 import { PageThumb } from '../common/PageThumb';
 import { baseName, desktop, newProject, openProjectFile, openProjectPath, projectName } from '../Shell/fileActions';
-import { ICONS } from '../Shell/icons';
+import { APP_ICON, ICONS } from '../Shell/icons';
 import styles from './StartScreen.module.css';
 
 // 作るものの種類。選ぶと、その種類に合うテンプレートを並べる（templates はテンプレートの id）
@@ -39,7 +39,7 @@ export function StartScreen() {
     <div className={styles.start}>
       <header className={styles.top}>
         <button className={styles.brand} onClick={() => setStep({ kind: 'goal' })} title="最初の画面に戻る">
-          <span className={styles.mark}>P</span>PageEdit
+          <img className={styles.mark} src={APP_ICON} alt="" />PageEdit
         </button>
         <span className={styles.grow} />
         <button className={styles.topBtn} onClick={openProjectFile}>
