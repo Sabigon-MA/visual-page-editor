@@ -130,6 +130,49 @@ export function pageLinks(pages: Page[]): PageLink[] {
   }));
 }
 
+// リンクの項目：メニュー・お知らせ一覧は項目ごと、ほかの要素は要素ごと
+export interface LinkItem {
+  el: PageElement;
+  label: string;
+  link: string; // ページ ID・URL（https: / mailto: / tel:）・#要素のID
+}
+
+export function linkItems(el: PageElement): LinkItem[] {
+  if (el.type === 'nav') return navItems(el.text).filter((it) => it.link).map((it) => ({ el, label: it.label, link: it.link }));
+  if (el.type === 'news') return newsItems(el.text).filter((it) => it.link).map((it) => ({ el, label: it.title, link: it.link }));
+  const link = el.to || el.href;
+  return link ? [{ el, label: elementName(el), link }] : [];
+}
+
+// 全ページ共通のヘッダー・フッターからのページへのリンク
+export function sharedPageLinks(site: Site, pages: Page[]): LinkItem[] {
+  const ids = new Set(pages.map((p) => p.id));
+  return [...(site.header ?? []), ...(site.footer ?? [])].flatMap(linkItems).filter((it) => ids.has(it.link));
+}
+
+// 外部サイトへのリンク（共通のヘッダー・フッターは含めない）
+export function externalLinks(elements: PageElement[]): LinkItem[] {
+  return elements.flatMap(linkItems).filter((it) => navLinkKind(it.link) === 'url');
+}
+
+// 最初のページからリンクをたどっても行けないページ（共通メニューのリンク先は行けるものとする。404 ページは除く）
+export function unreachablePages(pages: Page[], site: Site): Set<string> {
+  if (!pages.length) return new Set();
+  const links = pageLinks(pages);
+  const seen = new Set([pages[0].id, ...sharedPageLinks(site, pages).map((it) => it.link)]);
+  const queue = [...seen];
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const l of links) {
+      if (l.from === id && !seen.has(l.to)) {
+        seen.add(l.to);
+        queue.push(l.to);
+      }
+    }
+  }
+  return new Set(pages.filter((p) => !seen.has(p.id) && p.id !== site.notFound).map((p) => p.id));
+}
+
 // 遷移図や一覧に出す要素の短い名前（例：ボタン「ログイン」）
 export function elementName(el: PageElement): string {
   const t = el.text.trim();
