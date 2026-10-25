@@ -6,9 +6,9 @@ import { boxTag, FORM_ID, hasAnim, resolveBox } from './defaults';
 import { getMenuLayer, isAnchor, navigate, pageHref, scrollToAnchor } from './nav';
 import { applySp, bandStyle, isBand, MOBILE_QUERY } from './responsive';
 import {
-  BURGER_STYLE, BURGER_SVG, CARD_DESCRIPTION, CARD_LINK, FORM_RESET, IMAGE_STYLE, ITEM_HOVER_TYPES, LABEL_STYLE, LINK_STYLE, NAV_CLOSE_STYLE,
+  BURGER_STYLE, BURGER_SVG, CARD_DESCRIPTION, CARD_LINK, FORM_RESET, ITEM_HOVER_TYPES, LABEL_STYLE, LINK_STYLE, NAV_CLOSE_STYLE,
   NAV_LINK_STYLE, NAV_PANEL_LINK_STYLE, NAV_UNDERLINE, NEWS_DATE_STYLE, NEWS_ITEM_STYLE, NEWS_ROW_STYLE, NEWS_TITLE_STYLE, SHAPE_TEXT_STYLE,
-  SHAPE_TYPES, TABLE_STYLE, animValue, cellStyle, hoverMotion, innerStyle, itemHoverStyle, navCollapsed, navItems, navLinkKind, navPanelStyle,
+  SHAPE_TYPES, TABLE_STYLE, animValue, cellStyle, hoverMotion, imageStyle, innerStyle, itemHoverStyle, navCollapsed, navItems, navLinkKind, navPanelStyle,
   newsItems, shapeSvg, splitOptions, tableRows, withHover, wrapperStyle, type StyleObject,
 } from './styles';
 
@@ -273,7 +273,7 @@ function BoxContent({ el }: { el: BoxData }) {
     case 'slider':
       return <Slider label={el.text} name={el.name} />;
     case 'image':
-      if (el.src) return <img src={el.src} alt={el.alt} draggable={false} style={css(IMAGE_STYLE)} />;
+      if (el.src) return <img src={el.src} alt={el.alt} draggable={false} style={css(imageStyle(el))} />;
       return (
         <>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

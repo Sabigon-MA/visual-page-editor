@@ -10,11 +10,11 @@ import { FORM_ACTION_RE } from '../parser/validate';
 import { isAnchor } from '../runtime/nav';
 import { composeExport, stickyHeight } from '../model/shared';
 import {
-  CARD_DESCRIPTION, CARD_LINK, FORM_RESET, IMAGE_STYLE, LABEL_STYLE, LINK_STYLE, SHAPE_TEXT_STYLE, SHAPE_TYPES, TABLE_STYLE,
+  CARD_DESCRIPTION, CARD_LINK, FORM_RESET, LABEL_STYLE, LINK_STYLE, SHAPE_TEXT_STYLE, SHAPE_TYPES, TABLE_STYLE,
   BURGER_STYLE, BURGER_SVG, NAV_CLOSE_STYLE, NAV_LINK_STYLE, NAV_PANEL_LINK_STYLE, NAV_UNDERLINE, navCollapsed, navItems, navLinkKind, navPanelStyle,
   NEWS_DATE_STYLE, NEWS_ITEM_STYLE, NEWS_ROW_STYLE, NEWS_TITLE_STYLE, ITEM_HOVER_TYPES, itemHoverStyle, newsItems,
   TO_TOP_AFTER, TO_TOP_STYLE, TO_TOP_SVG,
-  animValue, cellStyle, hoverMotion, innerStyle, pageHeight, shapeSvg, splitOptions, tableRows, toCssText, withHover,
+  animValue, cellStyle, hoverMotion, imageStyle, innerStyle, pageHeight, shapeSvg, splitOptions, tableRows, toCssText, withHover,
 } from '../runtime/styles';
 import type { Page, PageElement, Project, Site } from '../types/element';
 import { escapeHTML } from '../utils/html';
@@ -75,7 +75,7 @@ function contentHTML(el: PageElement, radioName: string, asset: (src: string) =>
         .map((row, i) => `<tr>${row.map((c) => `<td style="${escapeHTML(toCssText(cellStyle(el, i === 0)))}">${escapeHTML(c)}</td>`).join('')}</tr>`)
         .join('')}</tbody></table>`;
     case 'image':
-      if (el.src) return `<img src="${escapeHTML(asset(el.src))}" alt="${escapeHTML(el.alt)}" loading="lazy" style="${toCssText(IMAGE_STYLE)}">`;
+      if (el.src) return `<img src="${escapeHTML(asset(el.src))}" alt="${escapeHTML(el.alt)}" loading="lazy" style="${escapeHTML(toCssText(imageStyle(el)))}">`;
       return `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2"/><circle cx="8" cy="8" r="2"/><path d="M2 17l6-6 4 4 3-3 7 7"/></svg><span style="font-size:11px">画像プレースホルダー</span>`;
     case 'card':
       return `<div style="margin-bottom:6px">${t}</div><div style="font-size:12px;font-weight:normal;color:#8a8a86;line-height:1.6;flex:1">${CARD_DESCRIPTION}</div><span style="font-size:12px;font-weight:500;color:#3b7ef6">${CARD_LINK}</span>`;

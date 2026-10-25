@@ -55,14 +55,25 @@ describe('画像', () => {
     s().newProject({ w: 1000, h: 800 });
   });
 
-  it('埋め込んで追加すると、画面の 6 割に収まる大きさで置く', () => {
-    s().addImage({ dataUrl: PNG, ext: 'png', w: 2000, h: 1000 }, { pos: { x: 500, y: 400 } });
+  it('埋め込んで追加すると、元の大きさで置く', () => {
+    s().addImage({ dataUrl: PNG, ext: 'png', w: 400, h: 300 }, { pos: { x: 500, y: 400 } });
     const el = s().elements[0];
-    expect(el).toMatchObject({ type: 'image', src: 'assets/img-1.png', w: 600, h: 300, x: 200, y: 250 });
+    expect(el).toMatchObject({ type: 'image', src: 'assets/img-1.png', w: 400, h: 300, x: 300, y: 250 });
+    expect(el.imgPos).toBeUndefined();
     expect(s().assets['assets/img-1.png']).toBe(PNG);
-    // 差し替えは別のファイル名になる
+    // 差し替えは別のファイル名になり、ボックスも新しい画像の大きさになる
     s().addImage({ dataUrl: PNG2, ext: 'png', w: 10, h: 10 }, { id: el.id });
-    expect(s().elements[0].src).toBe('assets/img-2.png');
+    expect(s().elements[0]).toMatchObject({ src: 'assets/img-2.png', w: 20, h: 10, x: 300 });
+  });
+
+  it('画面の幅からはみ出す画像は、画面の幅にして中央を切り抜く', () => {
+    s().addImage({ dataUrl: PNG, ext: 'png', w: 2000, h: 1000 }, { pos: { x: 500, y: 400 } });
+    expect(s().elements[0]).toMatchObject({ w: 1000, h: 1000, x: 0, imgPos: '50% 50%' });
+    const code = generatePageCode(s().elements, { id: 'page-1', name: 'A' }, { w: 1000, h: 800 }, 'react');
+    expect(code).toContain('imgPos="50% 50%"');
+    const back = parseReact(code);
+    expect(back.ok && back.elements[0].imgPos).toBe('50% 50%');
+    expect(parseReact(code.replace('50% 50%', '50%;color:red')).ok).toBe(false);
   });
 
   it('同じ画像はもう一度埋め込まない', () => {

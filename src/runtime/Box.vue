@@ -6,9 +6,9 @@ import { boxTag, FORM_ID, hasAnim, resolveBox } from './defaults';
 import { getMenuLayer, isAnchor, navigate, pageHref, scrollToAnchor, type MenuLayer } from './nav';
 import { applySp, bandStyle, isBand, MOBILE_QUERY } from './responsive';
 import {
-  BURGER_STYLE, BURGER_SVG, CARD_DESCRIPTION, CARD_LINK, FORM_RESET, IMAGE_STYLE, ITEM_HOVER_TYPES, LABEL_STYLE, LINK_STYLE, NAV_CLOSE_STYLE,
+  BURGER_STYLE, BURGER_SVG, CARD_DESCRIPTION, CARD_LINK, FORM_RESET, ITEM_HOVER_TYPES, LABEL_STYLE, LINK_STYLE, NAV_CLOSE_STYLE,
   NAV_LINK_STYLE, NAV_PANEL_LINK_STYLE, NAV_UNDERLINE, NEWS_DATE_STYLE, NEWS_ITEM_STYLE, NEWS_ROW_STYLE, NEWS_TITLE_STYLE, SHAPE_TEXT_STYLE,
-  SHAPE_TYPES, TABLE_STYLE, animValue, cellStyle, hoverMotion, innerStyle, itemHoverStyle, navCollapsed, navItems, navLinkKind, navPanelStyle,
+  SHAPE_TYPES, TABLE_STYLE, animValue, cellStyle, hoverMotion, imageStyle, innerStyle, itemHoverStyle, navCollapsed, navItems, navLinkKind, navPanelStyle,
   newsItems, shapeSvg, splitOptions, tableRows, withHover, wrapperStyle, type StyleObject,
 } from './styles';
 
@@ -37,6 +37,7 @@ const props = defineProps<{
   letterSpacing?: string;
   src?: string;
   alt?: string;
+  imgPos?: string; // 画像の切り抜く位置
   tag?: string;
   text?: string; // 複数行のテキスト（表）。1行ならスロットに書く
   placeholder?: string;
@@ -267,7 +268,7 @@ function onClick(e: MouseEvent) {
         <label :style="{ display: 'flex', justifyContent: 'space-between', width: '100%' }"><span>{{ el.text }}</span><span>{{ sliderValue }}</span></label>
         <input v-model.number="sliderValue" type="range" min="0" max="100" v-bind="field" :style="{ width: '100%', margin: '0' }" />
       </template>
-      <img v-else-if="el.type === 'image' && el.src" :src="el.src" :alt="el.alt" draggable="false" :style="IMAGE_STYLE" />
+      <img v-else-if="el.type === 'image' && el.src" :src="el.src" :alt="el.alt" draggable="false" :style="imageStyle(el)" />
       <template v-else-if="el.type === 'image'">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <rect x="2" y="2" width="20" height="20" rx="2" /><circle cx="8" cy="8" r="2" /><path d="M2 17l6-6 4 4 3-3 7 7" />

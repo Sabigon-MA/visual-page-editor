@@ -88,6 +88,7 @@ export interface BoxData extends BoxStyle {
   href: string; // クリックで開く外部の URL（https:// / mailto: / tel:。'' = なし）。to とは同時に使わない
   newTab: boolean; // href を新しいタブで開く
   alt: string; // 画像の代替テキスト（読み上げ・検索エンジン用）
+  imgPos?: string; // 画像の切り抜く位置（CSS の object-position。'50% 0%' など）。なければボックスに合わせて伸縮する
   tag: string; // テキスト・見出しの HTML タグ（h1〜h6 / p / div。'' = 種類ごとの既定）
   name: string; // フォームの入力欄の名前（送信するときの項目名。'' = 送信しない）
   inputType: string; // 1行の入力欄の種類（text / email / tel / number）

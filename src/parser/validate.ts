@@ -41,6 +41,9 @@ export const SRC_RE = /^(assets\/[\w.-]+|https?:\/\/[^\s"'<>]+)$/;
 // リンク先の URL：http(s)・メール・電話と、ページ内の位置（#要素のID・#top）
 export const HREF_RE = /^(https?:\/\/[^\s"'<>]+|mailto:[^\s"'<>]+|tel:[+\d\-() ]+|#[A-Za-z_][\w-]*)$/;
 
+// 画像の切り抜く位置（'50% 0%' のように横・縦を % で）
+export const IMG_POS_RE = /^(100|\d{1,2}(\.\d+)?)% (100|\d{1,2}(\.\d+)?)%$/;
+
 // フォームの入力欄の名前
 export const FIELD_NAME_RE = /^[\w\-[\]]{1,40}$/;
 
@@ -99,6 +102,7 @@ export function buildElement(raw: Record<string, unknown>, text: string, pos: Po
   if (raw.submit === true && ((typeof raw.href === 'string' && raw.href) || (typeof raw.to === 'string' && raw.to))) err('submit（フォームの送信）と to / href（リンク）は同時に指定できません');
   if (typeof raw.tag === 'string' && raw.tag && !TEXT_TAGS.includes(raw.tag)) err(`tag は ${TEXT_TAGS.join(' / ')} のいずれかです`);
   if (typeof raw.src === 'string' && raw.src && !SRC_RE.test(raw.src)) err('src には assets/ の画像か http(s):// の URL を指定してください');
+  if (typeof raw.imgPos === 'string' && raw.imgPos && !IMG_POS_RE.test(raw.imgPos)) err("imgPos は '50% 0%' のように横・縦の位置を 0〜100% で指定してください");
   if (typeof raw.group === 'string' && raw.group && !/^[A-Za-z_][\w-]*$/.test(raw.group)) err(`group "${raw.group}" には英数字・_・- のみ使えます`);
 
   const id = raw.id;
