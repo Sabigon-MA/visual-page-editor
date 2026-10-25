@@ -596,18 +596,22 @@ export const useEditor = create<EditorState>()((set, get) => {
       const { elements } = get();
       const screen = viewScreen(get());
       const src = get().addAsset(dataUrl, ext);
+      // 元の大きさで置く。画面の幅からはみ出すときは画面の幅にして、はみ出した部分を切り抜く（中央を表示）
+      const size = { w: Math.max(20, Math.min(w, screen.w)), h: Math.max(10, h) };
+      const imgPos = w > screen.w ? '50% 50%' : undefined;
       if (id) {
-        get().update(id, { src }, true);
+        const cur = elements.find((e) => e.id === id);
+        const x = cur ? Math.max(0, Math.min(cur.x, screen.w - size.w)) : 0;
+        get().update(id, { src, ...size, x, imgPos }, true);
         return;
       }
-      // 画面の 6 割に収まる大きさで、縦横比を保って置く（位置の指定がなければ見えている範囲の中央）
-      const k = Math.min(1, (screen.w * 0.6) / w, (screen.h * 0.6) / h);
-      const size = { w: Math.max(20, Math.round(w * k)), h: Math.max(10, Math.round(h * k)) };
+      // 位置の指定がなければ見えている範囲の中央
       const c = pos ? { x: pos.x - size.w / 2, y: pos.y - size.h / 2 } : cascade(elements, viewCenter?.() ?? { x: screen.w / 2, y: Math.min(screen.h, 600) / 2 }, size);
       const el = createElement('image', nextId(elements), {
         src,
         ...size,
-        x: Math.max(0, Math.round(c.x)),
+        imgPos,
+        x: Math.max(0, Math.min(Math.round(c.x), screen.w - size.w)),
         y: Math.max(0, Math.round(c.y)),
         bg: 'transparent',
         border: 'none',

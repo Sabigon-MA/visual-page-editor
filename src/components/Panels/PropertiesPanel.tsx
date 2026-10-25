@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { SHADOWS } from '../../model/animations';
 import {
@@ -6,7 +6,7 @@ import {
 } from '../../model/elementTypes';
 import { FIELD_NAME_RE, FORM_ACTION_RE, HREF_RE } from '../../parser/validate';
 import { boxTag, defaultTag, FIELD_TYPES } from '../../runtime/defaults';
-import { ITEM_HOVER_TYPES, navItems, navLinkKind, navText, newsItems, newsText, type NavItem, type NewsItem } from '../../runtime/styles';
+import { ITEM_HOVER_TYPES, navItems, navLinkKind, navText, newsItems, newsText, splitOptions, type NavItem, type NewsItem } from '../../runtime/styles';
 import { imageSize } from '../../utils/image';
 import { removeSectionWithToast } from '../Shell/editActions';
 import { insertImage } from '../Shell/fileActions';
@@ -157,16 +157,14 @@ function TextSection({ el }: { el: PageElement }) {
   return (
       <div className={styles.section}>
         <div className={styles.title}>テキスト</div>
-        {!NO_TEXT_TYPES.includes(el.type) && el.type !== 'table' && (
-          <>
-            <Row label={TEXT_LABELS[el.type] ?? '内容'}>
-              {MULTILINE_TYPES.includes(el.type)
-                ? <TextAreaField className={`${styles.input} ${styles.area} ${styles.prose}`} value={el.text} rows={Math.min(6, el.text.split('\n').length + 1)} onChange={(text) => set({ text })} onCommit={commit} />
-                : <TextField className={styles.input} value={el.text} onChange={(text) => set({ text })} onCommit={commit} />}
-            </Row>
-            {OPTION_TYPES.includes(el.type) && <div className={styles.hint}>カンマ区切りで入力</div>}
-          </>
+        {!NO_TEXT_TYPES.includes(el.type) && el.type !== 'table' && !OPTION_TYPES.includes(el.type) && (
+          <Row label={TEXT_LABELS[el.type] ?? '内容'}>
+            {MULTILINE_TYPES.includes(el.type)
+              ? <TextAreaField className={`${styles.input} ${styles.area} ${styles.prose}`} value={el.text} rows={Math.min(6, el.text.split('\n').length + 1)} onChange={(text) => set({ text })} onCommit={commit} />
+              : <TextField className={styles.input} value={el.text} onChange={(text) => set({ text })} onCommit={commit} />}
+          </Row>
         )}
+        {OPTION_TYPES.includes(el.type) && <OptionsSection el={el} />}
         {el.type === 'table' && <TableSection el={el} />}
         {PLACEHOLDER_TYPES.includes(el.type) && (
           <Row label="プレースホルダー">
@@ -505,6 +503,13 @@ function ImageSection({ el }: { el: PageElement }) {
         <button className={styles.btnGhost} disabled={!el.src || el.locked} onClick={() => void fixRatio()} title="幅はそのままで、高さを画像の縦横比に合わせる">元の縦横比</button>
       </div>
       {el.src && <div className={styles.hint} style={{ marginLeft: 0, marginTop: 6 }}>角をドラッグすると縦横比を保ったまま拡大・縮小します（Shift で自由に変形）</div>}
+      {el.src && (
+        <label className={styles.check} style={{ margin: '4px 0 6px' }}>
+          <input type="checkbox" checked={!!el.imgPos} disabled={el.locked} onChange={(e) => useEditor.getState().update(el.id, { imgPos: e.target.checked ? '50% 50%' : undefined }, true)} />
+          切り抜いて表示（伸び縮みさせない）
+        </label>
+      )}
+      {el.src && el.imgPos && <CropFrame el={el} url={asset ?? el.src} />}
       <Row label="代替テキスト">
         <TextField
           className={styles.input}
@@ -518,6 +523,80 @@ function ImageSection({ el }: { el: PageElement }) {
     </div>
   );
 }
+
+// 切り抜く範囲：画像全体の上に表示される範囲の枠を出し、ドラッグで動かす
+function CropFrame({ el, url }: { el: PageElement; url: string }) {
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    imageSize(url).then((s) => alive && setSize(s), () => alive && setSize(null));
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+  if (!size) return null;
+  // ボックスを覆う倍率と、表示される範囲（画像に対する割合）
+  const k = Math.max(el.w / size.w, el.h / size.h);
+  const fw = Math.min(1, el.w / (size.w * k));
+  const fh = Math.min(1, el.h / (size.h * k));
+  const [px, py] = (el.imgPos ?? '50% 50%').split(' ').map((v) => parseFloat(v) / 100);
+  const drag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (el.locked) return;
+    e.preventDefault();
+    const box = e.currentTarget.parentElement!.getBoundingClientRect();
+    const start = { x: e.clientX, y: e.clientY, left: (1 - fw) * px, top: (1 - fh) * py };
+    // 動かせる幅（free）の中での位置を % にする
+    const pos = (d: number, from: number, free: number) => (free > 0 ? Math.round((Math.min(free, Math.max(0, from + d)) / free) * 1000) / 10 : 50);
+    const move = (ev: PointerEvent) => {
+      const x = pos((ev.clientX - start.x) / box.width, start.left, 1 - fw);
+      const y = pos((ev.clientY - start.y) / box.height, start.top, 1 - fh);
+      useEditor.getState().update(el.id, { imgPos: `${x}% ${y}%` });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      useEditor.getState().commit();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  return (
+    <>
+      <div className={styles.crop}>
+        <img src={url} alt="" draggable={false} />
+        <div
+          className={styles.cropFrame}
+          style={{ left: `${(1 - fw) * px * 100}%`, top: `${(1 - fh) * py * 100}%`, width: `${fw * 100}%`, height: `${fh * 100}%`, cursor: el.locked ? 'default' : 'move' }}
+          onPointerDown={drag}
+        />
+      </div>
+      <div className={styles.hint} style={{ marginLeft: 0 }}>枠をドラッグして、表示する部分を選びます（元の画像 {size.w} × {size.h} px）</div>
+    </>
+  );
+}
+
+// ラジオボタン・セレクトボックスの選択肢：1つずつ入力・追加・削除する（保存はカンマ区切り）
+function OptionsSection({ el }: { el: PageElement }) {
+  const items = splitOptions(el.text);
+  const save = (next: string[], done = true) => useEditor.getState().update(el.id, { text: next.join(',') }, done);
+  return (
+    <>
+      {items.map((o, i) => (
+        <div key={i} className={styles.row}>
+          <span className={styles.label}>{i === 0 ? '選択肢' : ''}</span>
+          <DraftField value={o} valid={(v) => !!v.trim()} clean={noComma} onSave={(v) => save(items.map((x, j) => (j === i ? v.trim() : x)), false)} />
+          <ItemButtons items={items} i={i} save={save} />
+        </div>
+      ))}
+      <div className={styles.buttons} style={{ marginTop: 0, marginBottom: 8, marginLeft: 62 }}>
+        <button className={styles.btnGhost} onClick={() => save([...items, `選択肢${items.length + 1}`])}>＋ 選択肢を追加</button>
+      </div>
+    </>
+  );
+}
+
+// 選択肢の区切りになる文字は入力できない
+const noComma = (v: string) => v.replace(/[,、]/g, '');
 
 // 表：1行が表の1行、カンマでセルを区切る。行・列の追加
 function TableSection({ el }: { el: PageElement }) {

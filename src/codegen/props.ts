@@ -12,7 +12,7 @@ export const ANIM_KEYS: (keyof ElementAnim)[] = ['type', 'duration', 'delay', 'i
 export const SP_KEYS: (keyof BoxSp)[] = ['x', 'y', 'w', 'h', 'fontSize', 'hidden'];
 export const HOVER_KEYS: (keyof BoxHover)[] = ['bg', 'color', 'shadow', 'scale', 'y', 'underline'];
 export const ALLOWED_PROPS = new Set<string>([
-  'id', 'type', 'tag', 'x', 'y', 'w', 'h', 'rotate', ...STYLE_KEYS, 'src', 'alt', 'placeholder', 'name', 'inputType', 'required', 'submit', 'to', 'href', 'newTab', 'group', 'locked', 'hidden', 'anim', 'hover', 'sp',
+  'id', 'type', 'tag', 'x', 'y', 'w', 'h', 'rotate', ...STYLE_KEYS, 'src', 'alt', 'imgPos', 'placeholder', 'name', 'inputType', 'required', 'submit', 'to', 'href', 'newTab', 'group', 'locked', 'hidden', 'anim', 'hover', 'sp',
 ]);
 
 export type PropValue = string | number | boolean | ElementAnim | BoxHover | BoxSp;
@@ -39,6 +39,7 @@ export function boxProps(el: PageElement): Prop[] {
   }
   if (el.src) props.push({ name: 'src', value: el.src });
   if (el.alt) props.push({ name: 'alt', value: el.alt });
+  if (el.src && el.imgPos) props.push({ name: 'imgPos', value: el.imgPos });
   if (el.placeholder) props.push({ name: 'placeholder', value: el.placeholder });
   if (el.name) props.push({ name: 'name', value: el.name });
   if (el.inputType && el.inputType !== 'text') props.push({ name: 'inputType', value: el.inputType });

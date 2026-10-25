@@ -284,6 +284,11 @@ export const TO_TOP_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" fill=
 export const LINK_STYLE: StyleObject = { display: 'block', color: 'inherit', textDecoration: 'none' };
 
 export const IMAGE_STYLE: StyleObject = { width: '100%', height: '100%', display: 'block', objectFit: 'fill' };
+
+// 画像の見た目。切り抜く位置（imgPos）があれば、縦横比を保ってボックスを覆い、はみ出した部分を切り抜く
+export function imageStyle(el: BoxData): StyleObject {
+  return el.imgPos ? { ...IMAGE_STYLE, objectFit: 'cover', objectPosition: el.imgPos } : IMAGE_STYLE;
+}
 export const SHAPE_TEXT_STYLE: StyleObject = { position: 'relative' };
 
 export const FORM_RESET: StyleObject = {
