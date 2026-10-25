@@ -44,6 +44,12 @@ function Modal({ title, onClose, children, footer, width = 420 }: { title: strin
 export function ConfirmDialog() {
   const c = useConfirm((s) => s.current);
   if (!c) return null;
+  return <ConfirmBody key={c.title + (c.input?.value ?? '')} c={c} />;
+}
+
+function ConfirmBody({ c }: { c: NonNullable<ReturnType<typeof useConfirm.getState>['current']> }) {
+  const [value, setValue] = useState(c.input?.value ?? '');
+  const ok = () => c.resolve('ok', value);
   return (
     <Modal
       title={c.title}
@@ -52,10 +58,25 @@ export function ConfirmDialog() {
         <>
           <button className={styles.btn} onClick={() => c.resolve('cancel')}>キャンセル</button>
           {c.alt && <button className={styles.btn} onClick={() => c.resolve('alt')}>{c.alt}</button>}
-          <button className={`${styles.btn} ${c.danger ? styles.danger : styles.primary}`} data-primary onClick={() => c.resolve('ok')}>{c.ok ?? 'OK'}</button>
+          <button className={`${styles.btn} ${c.danger ? styles.danger : styles.primary}`} data-primary disabled={!!c.input && !value.trim()} onClick={ok}>{c.ok ?? 'OK'}</button>
         </>
       }
     >
+      {c.input && (
+        <label className={styles.field} style={{ marginBottom: 12 }}>
+          <span>{c.input.label}</span>
+          <input
+            className={styles.wide}
+            value={value}
+            data-autofocus
+            onChange={(e) => setValue(e.target.value)}
+            onFocus={(e) => e.target.setSelectionRange(0, e.target.value.lastIndexOf('.') > 0 ? e.target.value.lastIndexOf('.') : e.target.value.length)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && value.trim()) ok();
+            }}
+          />
+        </label>
+      )}
       {c.message && <p className={styles.message}>{c.message}</p>}
     </Modal>
   );
