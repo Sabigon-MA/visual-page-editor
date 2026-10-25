@@ -13,7 +13,7 @@ import type { CodeFormat } from '../../types/element';
 import { DEFAULT_SCREEN } from '../../model/screens';
 import { buildTemplate, type SiteTemplate } from '../../model/templates';
 import { IMAGE_EXTS, loadImage, mimeOf } from '../../utils/image';
-import { choiceDialog, confirmDialog } from '../Dialog/confirm';
+import { choiceDialog, confirmDialog, promptDialog } from '../Dialog/confirm';
 import { toast } from '../common/Toast';
 
 // デスクトップ版（Tauri）では OS のダイアログでパスを選んで直接書き込む。
@@ -50,6 +50,25 @@ async function pickSaveFile(name: string, filter: FileFilter, type: string): Pro
   }
 }
 
+// 保存先を選べないブラウザ（Firefox・Safari など）：ダウンロードする前にファイル名を決めてもらう。キャンセルなら null
+const lastNames: Record<string, string> = {}; // 拡張子ごとに、前回付けた名前
+async function askDownloadName(name: string, ext: string): Promise<string | null> {
+  const where = /firefox/i.test(navigator.userAgent)
+    ? '保存先を毎回選ぶには、Firefox の設定 →「一般」→「ファイルとプログラム」の「ダウンロード」で「ファイルごとに保存先を指定する」をオンにしてください。'
+    : '保存先を毎回選ぶには、ブラウザのダウンロードの設定で「保存前に保存先を確認する」をオンにしてください。';
+  const input = await promptDialog({
+    title: 'ファイル名を付けて保存',
+    message: `このブラウザでは、ファイルはダウンロードフォルダに保存されます。${where}`,
+    ok: '保存',
+    input: { label: 'ファイル名', value: lastNames[ext] ?? name },
+  });
+  if (input === null) return null;
+  const clean = input.replace(/[\\/:*?"<>|]/g, '').trim() || name;
+  const file = clean.toLowerCase().endsWith(`.${ext}`) ? clean : `${clean}.${ext}`;
+  lastNames[ext] = file;
+  return file;
+}
+
 async function writeHandle(handle: FileSystemFileHandle, data: Uint8Array | string) {
   const w = await handle.createWritable();
   await w.write(data as FileSystemWriteChunkType);
@@ -81,8 +100,10 @@ async function saveBytes(name: string, data: Uint8Array | string, type: string, 
       await showError('書き出せませんでした', e);
       return;
     }
-    saveAs(new Blob([data as BlobPart], { type }), name);
-    toast(`「${name}」を書き出しました`);
+    const file = await askDownloadName(name, filter.extensions[0]);
+    if (!file) return;
+    saveAs(new Blob([data as BlobPart], { type }), file);
+    toast(`「${file}」を書き出しました`);
     return;
   }
   try {
@@ -130,10 +151,12 @@ export async function saveProjectFileAs(): Promise<boolean> {
     }
     if (handle === null) return false;
     if (handle) return writeProjectHandle(handle);
+    const file = await askDownloadName(`project.${EXT}`, EXT);
+    if (!file) return false;
     const json = serializeProject(projectOf(useEditor.getState()));
-    saveAs(new Blob([json], { type: 'application/json;charset=utf-8' }), `project.${EXT}`);
+    saveAs(new Blob([json], { type: 'application/json;charset=utf-8' }), file);
     useEditor.getState().markSaved(null);
-    toast('保存しました（ダウンロード）');
+    toast(`「${file}」を保存しました（ダウンロード）`);
     return true;
   }
   try {
