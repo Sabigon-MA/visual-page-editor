@@ -1,8 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { composePage } from '../../model/shared';
-import { elementName, externalLinks, pageBg, pageLinks, sharedPageLinks, unreachablePages, type LinkItem, type PageLink } from '../../model/pages';
+import { composePage, sharedKind } from '../../model/shared';
+import { elementName, externalLinks, linkItems, pageBg, unreachablePages, type LinkItem } from '../../model/pages';
 import { useEditor } from '../../store/elements';
-import type { Page, Screen, Site } from '../../types/element';
+import type { Page, PageElement, Screen, Site } from '../../types/element';
 import { trackDrag } from '../Canvas/interactions';
 import { PageThumb } from '../common/PageThumb';
 import { pageMenu } from '../ContextMenu/menus';
@@ -28,13 +28,41 @@ interface Point {
   y: number;
 }
 
+// 画面遷移：ページのコード（共通のヘッダー・フッターを含めた、書き出すときの要素）にあるリンクを、
+// 遷移元のページから遷移先のページへの矢印にする。メニューは項目ごとに1本
+interface FlowLink {
+  key: string;
+  from: string; // 遷移元のページ ID
+  to: string; // 遷移先のページ ID
+  el: PageElement;
+  label: string;
+  at: number; // 要素の中の始点の位置（横。メニューは項目の位置）
+  shared: boolean; // 共通のヘッダー・フッターの要素
+}
+
+function flowLinks(pages: Page[], site: Site, screen: Screen): FlowLink[] {
+  const ids = new Set(pages.map((p) => p.id));
+  return pages.flatMap((p) => composePage(p.elements, site, screen).elements.filter((el) => !el.hidden).flatMap((el) => {
+    const items = linkItems(el);
+    return items.flatMap((it: LinkItem, i) => (ids.has(it.link) && it.link !== p.id ? [{
+      key: `${p.id}:${el.id}:${i}`,
+      from: p.id,
+      to: it.link,
+      el,
+      label: el.type === 'nav' || el.type === 'news' ? it.label : elementName(el),
+      at: el.type === 'nav' ? (i + 0.5) / items.length : 0.5,
+      shared: !!sharedKind(site, el.id),
+    }] : []));
+  }));
+}
+
 // リンクの矢印：要素の位置（サムネイル上）から、移動先のカードの辺へ
-function arrowPath(link: PageLink, pages: Page[], screen: Screen) {
+function arrowPath(link: FlowLink, pages: Page[], screen: Screen) {
   const { s, tw, w } = cardSize(screen);
   const from = pages.find((p) => p.id === link.from)!;
   const el = link.el;
   const start: Point = {
-    x: from.flow.x + (w - tw) / 2 + (el.x + el.w / 2) * s,
+    x: from.flow.x + (w - tw) / 2 + (el.x + el.w * link.at) * s,
     y: from.flow.y + HEAD_H + Math.min(el.y + el.h / 2, screen.h) * s,
   };
   return curve(start, pages.find((p) => p.id === link.to)!, screen);
@@ -68,35 +96,10 @@ function curve(start: Point, to: Page, screen: Screen) {
   return { d: `M${start.x},${start.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${end.x},${end.y}`, start, mid };
 }
 
-// 共通メニュー（全ページのヘッダー・フッター）のリンク。どのページからも行けるので、
-// サイトマップのように最初のページから移動先のページへの線で表す（移動先ごとに1本）
-interface SharedLink {
-  to: string;
-  items: LinkItem[];
-}
-
-function sharedLinksOf(site: Site, pages: Page[]): SharedLink[] {
-  const out: SharedLink[] = [];
-  for (const it of sharedPageLinks(site, pages)) {
-    if (it.link === pages[0].id) continue;
-    const l = out.find((x) => x.to === it.link);
-    if (l) l.items.push(it);
-    else out.push({ to: it.link, items: [it] });
-  }
-  return out;
-}
-
-// 最初のページのカードの右の辺から、移動先のカードへ（始点は右の辺に等間隔に並べる）
-function sharedPath(i: number, n: number, pages: Page[], to: string, screen: Screen) {
-  const { w, th } = cardSize(screen);
-  const from = pages[0].flow;
-  return curve({ x: from.x + w, y: from.y + HEAD_H + ((i + 1) / (n + 1)) * th }, pages.find((p) => p.id === to)!, screen);
-}
-
 // 最初のページからリンクをたどった段数で列に分けて並べる
 function autoLayout(pages: Page[], site: Site, screen: Screen): Record<string, Point> {
   const { w, h } = cardSize(screen);
-  const links = [...pageLinks(pages), ...sharedLinksOf(site, pages).map((l) => ({ from: pages[0].id, to: l.to }))];
+  const links = flowLinks(pages, site, screen);
   const level = new Map<string, number>([[pages[0].id, 0]]);
   const queue = [pages[0].id];
   while (queue.length) {
@@ -134,10 +137,9 @@ export function FlowView() {
   const wrap = useRef<HTMLDivElement>(null);
   const { w, h } = cardSize(screen);
 
-  const shared = sharedLinksOf(site, pages);
+  const links = flowLinks(pages, site, screen);
+  const hasShared = links.some((l) => l.shared);
   const unreachable = unreachablePages(pages, site);
-
-  const links = pageLinks(pages).filter((l) => l.from !== l.to);
   const width = Math.max(...pages.map((p) => p.flow.x + w)) + 240;
   const height = Math.max(...pages.map((p) => p.flow.y + h)) + 200;
   const { addPage, arrangeFlow, setPage, select, setView, setPanel } = useEditor.getState();
@@ -164,7 +166,7 @@ export function FlowView() {
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  const openLink = (l: PageLink) => {
+  const openLink = (l: FlowLink) => {
     setView('canvas');
     setPage(l.from);
     select(l.el.id);
@@ -184,10 +186,10 @@ export function FlowView() {
         </span>
         <span className={styles.legend}>
           <span className={styles.legendDot} />クリックで移動する要素 <span className={styles.legendArrow}>→</span> 移動先のページ
-          {shared.length > 0 && <><span className={styles.legendShared}>┄→</span> 共通メニュー（全ページから行ける）</>}
+          {hasShared && <><span className={styles.legendShared}>┄→</span> 共通のヘッダー・フッターから</>}
         </span>
       </div>
-      {links.length === 0 && shared.length === 0 && (
+      {links.length === 0 && (
         <div className={styles.hint}>
           まだ画面遷移がありません。キャンバスで要素を選び、右パネルの「リンク」で移動先のページを設定すると、ここに矢印で表示されます。
         </div>
@@ -206,17 +208,14 @@ export function FlowView() {
               <path d="M0,0 L10,5 L0,10 z" fill="#0e9384" />
             </marker>
           </defs>
-          {shared.map((l, i) => (
-            <path key={`shared-${l.to}`} d={sharedPath(i, shared.length, pages, l.to, screen).d} className={styles.pathShared} markerEnd="url(#vpe-arrow-shared)" />
-          ))}
           {links.map((l) => {
-            const key = `${l.from}:${l.el.id}`;
             const a = arrowPath(l, pages, screen);
-            const hl = hoverLink === key;
+            const hl = hoverLink === l.key;
+            const kind = hl ? 'Hl' : l.shared ? 'Shared' : '';
             return (
-              <g key={key}>
-                <path d={a.d} className={hl ? styles.pathHl : styles.path} markerEnd={`url(#${hl ? 'vpe-arrow-hl' : 'vpe-arrow'})`} />
-                <circle cx={a.start.x} cy={a.start.y} r={4} className={hl ? styles.dotHl : styles.dot} />
+              <g key={l.key}>
+                <path d={a.d} className={styles[`path${kind}`]} markerEnd={`url(#vpe-arrow${hl ? '-hl' : l.shared ? '-shared' : ''})`} />
+                <circle cx={a.start.x} cy={a.start.y} r={4} className={styles[`dot${kind}`]} />
               </g>
             );
           })}
@@ -234,33 +233,18 @@ export function FlowView() {
           />
         ))}
         {links.map((l) => {
-          const key = `${l.from}:${l.el.id}`;
           const a = arrowPath(l, pages, screen);
           return (
             <button
-              key={key}
-              className={`${styles.label} ${hoverLink === key ? styles.labelHl : ''}`}
+              key={l.key}
+              className={`${styles.label} ${l.shared ? styles.labelShared : ''} ${hoverLink === l.key ? styles.labelHl : ''}`}
               style={{ left: a.mid.x, top: a.mid.y }}
-              title="クリックでこの要素を選択して編集"
-              onMouseEnter={() => setHoverLink(key)}
+              title={`${pages.find((p) => p.id === l.from)?.name} → ${pages.find((p) => p.id === l.to)?.name}${l.shared ? '（共通のヘッダー・フッター）' : ''}\nクリックでこの要素を選択して編集`}
+              onMouseEnter={() => setHoverLink(l.key)}
               onMouseLeave={() => setHoverLink(null)}
               onClick={() => openLink(l)}
             >
-              {elementName(l.el)}
-            </button>
-          );
-        })}
-        {shared.map((l, i) => {
-          const a = sharedPath(i, shared.length, pages, l.to, screen);
-          return (
-            <button
-              key={`shared-${l.to}`}
-              className={`${styles.label} ${styles.labelShared}`}
-              style={{ left: a.mid.x, top: a.mid.y }}
-              title={`共通メニュー（全ページから行ける）：${l.items.map((it) => it.label).join('・')}\nクリックでこのメニューを選択して編集`}
-              onClick={() => openLink({ from: pages[0].id, to: l.to, el: l.items[0].el })}
-            >
-              {l.items.map((it) => it.label).join('・')}
+              {l.label}
             </button>
           );
         })}
