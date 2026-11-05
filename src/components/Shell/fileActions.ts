@@ -9,10 +9,13 @@ import { siteZip, toHTML } from '../../codegen/toHTML';
 import { isDirty, projectOf, useEditor } from '../../store/elements';
 import { parseProject, serializeProject } from '../../store/projectIO';
 import { useRecent } from '../../store/recent';
+import { askSaveTune } from '../../tune/actions';
+import { tuneCss, useTune } from '../../tune/store';
 import type { CodeFormat } from '../../types/element';
 import { DEFAULT_SCREEN } from '../../model/screens';
 import { buildTemplate, type SiteTemplate } from '../../model/templates';
 import { IMAGE_EXTS, loadImage, mimeOf } from '../../utils/image';
+import { draftPageNames, draftsVersion, dropStaleDrafts, flushCode } from '../CodeEditor/drafts';
 import { choiceDialog, confirmDialog, promptDialog } from '../Dialog/confirm';
 import { toast } from '../common/Toast';
 
@@ -133,14 +136,57 @@ export function exportZip(format: CodeFormat = useEditor.getState().codeFormat) 
   void saveBytes(`craft-export-${format}.zip`, data, 'application/zip', { name: 'zip', extensions: ['zip'] });
 }
 
+// 保存する直前に、入力待ちのコードをキャンバスに反映する。true なら保存してよい。
+// 保存先を選ぶ間などに別のプロジェクトになっていたら（rev が変わっていたら）保存しない。
+// コードにエラーがあって反映できていなければ、保存せずに直すよう案内する。
+async function readyToSave(rev: number): Promise<boolean> {
+  flushCode();
+  if (useEditor.getState().projectRev !== rev) {
+    toast('別のプロジェクトになったため、保存を中止しました');
+    return false;
+  }
+  const names = draftPageNames();
+  if (!names.length) return true;
+  await confirmDialog({
+    title: 'コードにエラーがあるため保存できません',
+    message: `ページ「${names.join('」「')}」のコードにエラーがあり、キャンバスに反映できていません。コードのエラーを直してから保存してください。`,
+    ok: '閉じる',
+  });
+  return false;
+}
+
+// 保存する内容。保存を始めたときのプロジェクトとその状態（書き込みを待つ間の編集は含めない）
+function saveTarget() {
+  const s = useEditor.getState();
+  return { rev: s.projectRev, json: serializeProject(projectOf(s)), snapshot: { screen: s.screen, pages: s.pages, site: s.site } };
+}
+type SaveTarget = ReturnType<typeof saveTarget>;
+
+// 書き込み終わったら、保存を始めたときの状態を保存済みにする。
+// 書き込みを待つ間に別のプロジェクトになっていたら、いまのプロジェクトの保存先・保存済みの状態は変えない（false）
+function markSaved(t: SaveTarget, filePath: string | null): boolean {
+  if (useEditor.getState().projectRev !== t.rev) return false;
+  useEditor.getState().markSaved(filePath, t.snapshot);
+  return true;
+}
+
 // 上書き保存。保存先が決まっていなければ「名前を付けて保存」になる。保存できたら true。
 export async function saveProjectFile(): Promise<boolean> {
-  if (!desktop) return projectHandle ? writeProjectHandle(projectHandle) : saveProjectFileAs();
+  const rev = useEditor.getState().projectRev;
+  if (!(await readyToSave(rev))) return false;
+  if (!desktop) return projectHandle ? writeProjectHandle(projectHandle, saveTarget()) : saveProjectAs(rev);
   const path = useEditor.getState().filePath;
-  return path ? writeProject(path) : saveProjectFileAs();
+  return path ? writeProject(path, saveTarget()) : saveProjectAs(rev);
 }
 
 export async function saveProjectFileAs(): Promise<boolean> {
+  const rev = useEditor.getState().projectRev;
+  if (!(await readyToSave(rev))) return false;
+  return saveProjectAs(rev);
+}
+
+// 保存先を選んでから保存する。選ぶのを待つ間の変更も含めるよう、選んだ後にもう一度 readyToSave で確かめる
+async function saveProjectAs(rev: number): Promise<boolean> {
   if (!desktop) {
     let handle: FileSystemFileHandle | null | undefined;
     try {
@@ -150,30 +196,29 @@ export async function saveProjectFileAs(): Promise<boolean> {
       return false;
     }
     if (handle === null) return false;
-    if (handle) return writeProjectHandle(handle);
+    if (handle) return (await readyToSave(rev)) && writeProjectHandle(handle, saveTarget());
     const file = await askDownloadName(`project.${EXT}`, EXT);
-    if (!file) return false;
-    const json = serializeProject(projectOf(useEditor.getState()));
-    saveAs(new Blob([json], { type: 'application/json;charset=utf-8' }), file);
-    useEditor.getState().markSaved(null);
+    if (!file || !(await readyToSave(rev))) return false;
+    const t = saveTarget();
+    saveAs(new Blob([t.json], { type: 'application/json;charset=utf-8' }), file);
+    markSaved(t, null);
     toast(`「${file}」を保存しました（ダウンロード）`);
     return true;
   }
   try {
     const current = useEditor.getState().filePath;
     const path = await saveDialog({ defaultPath: current ?? `${projectName()}.${EXT}`, filters: [PROJECT_FILTER] });
-    return path ? await writeProject(path) : false;
+    return path ? (await readyToSave(rev)) && (await writeProject(path, saveTarget())) : false;
   } catch (e) {
     await showError('保存できませんでした', e);
     return false;
   }
 }
 
-async function writeProjectHandle(handle: FileSystemFileHandle): Promise<boolean> {
+async function writeProjectHandle(handle: FileSystemFileHandle, t: SaveTarget): Promise<boolean> {
   try {
-    await writeHandle(handle, serializeProject(projectOf(useEditor.getState())));
-    projectHandle = handle;
-    useEditor.getState().markSaved(null);
+    await writeHandle(handle, t.json);
+    if (markSaved(t, null)) projectHandle = handle;
     toast(`「${handle.name}」に保存しました`);
     return true;
   } catch (e) {
@@ -182,10 +227,10 @@ async function writeProjectHandle(handle: FileSystemFileHandle): Promise<boolean
   }
 }
 
-async function writeProject(path: string): Promise<boolean> {
+async function writeProject(path: string, t: SaveTarget): Promise<boolean> {
   try {
-    await writeTextFile(path, serializeProject(projectOf(useEditor.getState())));
-    useEditor.getState().markSaved(path);
+    await writeTextFile(path, t.json);
+    markSaved(t, path);
     useRecent.getState().add(path);
     toast(`「${baseName(path)}」に保存しました`);
     return true;
@@ -195,17 +240,49 @@ async function writeProject(path: string): Promise<boolean> {
   }
 }
 
-// 保存していない変更があれば、保存するか尋ねる。続けてよければ true（キャンセルなら false）。
+// 別のプロジェクトにする・アプリを閉じる前の確認。保存していない変更があれば保存するか尋ね、
+// コードにエラーがあって反映できていない書きかけがあれば、失われることを確かめる。続けてよければ true（キャンセルなら false）。
+// 保存や確認を待つ間に変更があれば、もう一度尋ねる（確かめていない変更は失わない）。
+// 待つ間に別のプロジェクトになっていたら、そのプロジェクトを捨てないよう false にする。
 export async function askSaveChanges(): Promise<boolean> {
-  if (!isDirty(useEditor.getState())) return true;
-  const choice = await choiceDialog({
-    title: `「${projectName()}」への変更を保存しますか？`,
-    message: '保存しないと、前回の保存からの変更は失われます。',
-    ok: '保存',
-    alt: '保存しない',
-  });
-  if (choice === 'ok') return saveProjectFile();
-  return choice === 'alt';
+  const rev = useEditor.getState().projectRev;
+  for (;;) {
+    flushCode();
+    const s = useEditor.getState();
+    if (s.projectRev !== rev) return false;
+    if (isDirty(s)) {
+      const choice = await choiceDialog({
+        title: `「${projectName()}」への変更を保存しますか？`,
+        message: '保存しないと、前回の保存からの変更は失われます。',
+        ok: '保存',
+        alt: '保存しない',
+      });
+      if (choice === 'cancel') return false;
+      if (choice === 'ok') {
+        if (!(await saveProjectFile())) return false;
+        continue; // 保存を待つ間に変更があったかを確かめ直す
+      }
+    }
+    const names = draftPageNames();
+    const drafts = draftsVersion();
+    if (names.length && !(await confirmDialog({
+      title: 'コードの書きかけを破棄しますか？',
+      message: `ページ「${names.join('」「')}」のコードにエラーがあり、キャンバスに反映できていません。続けると、この書きかけは失われます。`,
+      ok: '破棄して続ける',
+      danger: true,
+    }))) return false;
+    // 確かめた後に変わっていなければ続けてよい
+    flushCode();
+    const now = useEditor.getState();
+    if (now.projectRev !== rev) return false;
+    if (now.pages === s.pages && now.screen === s.screen && now.site === s.site && draftsVersion() === drafts) return true;
+  }
+}
+
+// 別のプロジェクトにする（確認は済んでいる）。前のプロジェクトのコードの書きかけは捨てる
+function replaceProject(load: () => void) {
+  load();
+  dropStaleDrafts();
 }
 
 // 新しいプロジェクト：保存していない変更を確かめてから、空白のページ（テンプレートを選んだらそのページ構成）で作る。
@@ -213,8 +290,10 @@ export async function askSaveChanges(): Promise<boolean> {
 export async function newProject(template?: SiteTemplate) {
   if (!(await askSaveChanges())) return;
   projectHandle = null;
-  if (template) useEditor.getState().loadProject(buildTemplate(template, DEFAULT_SCREEN));
-  else useEditor.getState().newProject(DEFAULT_SCREEN);
+  replaceProject(() => {
+    if (template) useEditor.getState().loadProject(buildTemplate(template, DEFAULT_SCREEN));
+    else useEditor.getState().newProject(DEFAULT_SCREEN);
+  });
 }
 
 // handle はブラウザ版で開いたファイル（上書き保存先にする）
@@ -223,7 +302,7 @@ async function loadProjectText(name: string, read: () => Promise<string>, path: 
     const project = parseProject(await read());
     if (!(await askSaveChanges())) return;
     projectHandle = handle;
-    useEditor.getState().loadProject(project, path);
+    replaceProject(() => useEditor.getState().loadProject(project, path));
     if (path) useRecent.getState().add(path);
   } catch (e) {
     await showError('プロジェクトを開けませんでした', new Error(`${name}: ${(e as Error).message}`));
@@ -324,6 +403,17 @@ export async function chooseSiteImage(key: 'favicon' | 'ogImage') {
   }
 }
 
+// アプリを閉じる前の確認。プロジェクトの確認を待つ間に見た目調整が変わっていたら、もう一度確かめる
+export async function askBeforeClose(): Promise<boolean> {
+  for (;;) {
+    if (useTune.getState().active && !(await askSaveTune())) return false;
+    const tune = useTune.getState();
+    if (!(await askSaveChanges())) return false;
+    const now = useTune.getState();
+    if (!now.active || (now.dir === tune.dir && tuneCss(now) === tuneCss(tune))) return true;
+  }
+}
+
 // デスクトップ版の初期化：ウィンドウのタイトル、閉じるときの確認、関連付けから開いたファイル
 export function initDesktop() {
   if (!desktop) return;
@@ -339,10 +429,10 @@ export function initDesktop() {
   updateTitle();
   useEditor.subscribe(updateTitle);
 
+  // 閉じる前に、既存サイトの見た目調整 → プロジェクトの順に、保存していない変更を確かめる（どちらかでキャンセル・保存に失敗したら閉じない）
   void win.onCloseRequested(async (e) => {
-    if (!isDirty(useEditor.getState())) return;
     e.preventDefault();
-    if (await askSaveChanges()) await win.destroy();
+    if (await askBeforeClose()) await win.destroy();
   });
 
   void invoke<string | null>('startup_file').then((path) => {

@@ -57,6 +57,7 @@ export interface EditorState {
   previewTrail: string[]; // プレビューで遷移してきたページ（戻る用）
   filePath: string | null; // デスクトップ版で開いている・保存したプロジェクトファイル（上書き保存先）
   saved: Snapshot | null; // 最後に保存した（開いた）ときの状態。null は一度も保存していない変更がある
+  projectRev: number; // 新規作成・開くでプロジェクトを入れ替えるたびに増える（保存はしない）
   brush: { sticky: boolean } | null; // 書式のコピー中（次にクリックした要素に書式を貼り付ける。sticky なら Esc まで続ける）
 
   // グループの要素はまとめて選択する。only でその要素だけ（グループの中の1つ）を選ぶ
@@ -117,7 +118,7 @@ export interface EditorState {
   endBrush(): void;
   toggleHidden(id: string): void;
   clearAll(): void;
-  replaceFromCode(els: PageElement[]): void;
+  replaceFromCode(els: PageElement[], pageId?: string): void; // pageId を省くと編集中のページ
   undo(): void;
   redo(): void;
 
@@ -141,7 +142,7 @@ export interface EditorState {
   closeHome(): void;
   newProject(screen: Screen): void;
   loadProject(project: Project, filePath?: string | null): void;
-  markSaved(filePath: string | null): void; // 保存した。filePath はデスクトップ版の保存先
+  markSaved(filePath: string | null, snapshot?: Snapshot): void; // 保存した。filePath はデスクトップ版の保存先、snapshot は保存した内容（省くと今の状態）
   setScreen(screen: Screen): void;
 }
 
@@ -340,7 +341,7 @@ export const useEditor = create<EditorState>()((set, get) => {
     set({
       screen: project.screen, pages, site, assets: project.assets ?? {}, pageId: page.id, elements: view(page.elements, false, site, project.screen, page), source: 'history', device: 'pc', viewW: clampViewW(project.screen.w),
       ...selection([]), setup: null, home: null, view: 'canvas', mode: 'edit', playing: false, zoom: 'fit', previewTrail: [], filePath, brush: null,
-      saved: { screen: project.screen, pages, site },
+      saved: { screen: project.screen, pages, site }, projectRev: get().projectRev + 1,
     });
     history.reset({ screen: project.screen, pages, site }, page.id);
   };
@@ -376,6 +377,7 @@ export const useEditor = create<EditorState>()((set, get) => {
     previewTrail: [],
     brush: null,
     filePath: initialFile.path,
+    projectRev: 0,
     saved: initialFile.dirty ? null : { screen: initial.screen, pages: initialPages, site: initialSite },
 
     select(id, opts = {}) {
@@ -801,10 +803,16 @@ export const useEditor = create<EditorState>()((set, get) => {
       set({ pages: get().pages.map((p) => (p.id === page.id ? { ...p, sections: [] } : p)) });
       change(get().elements.filter((e) => sharedKind(site, e.id)), true, selection([]));
     },
-    replaceFromCode(els) {
+    replaceFromCode(els, target = get().pageId) {
       // コードは PC の値と sp を書いたもの（表示がスマホでも同じ）
       const { pages, pageId, site, screen } = get();
-      const nextPages = withPage(pages, pageId, els, site, site);
+      const nextPages = withPage(pages, target, els, site, site);
+      if (target !== pageId) {
+        // 別のページに切り替えた後に、前のページのコードを反映する（表示中の要素はそのまま）
+        set({ pages: nextPages, source: 'code' });
+        history.push({ screen, pages: nextPages, site }, target);
+        return;
+      }
       const page = nextPages.find((p) => p.id === pageId)!;
       const shown = view(page.elements, mobile(), site, screen, page);
       const keep = get().selectedIds.filter((id) => shown.some((e) => e.id === id && !e.hidden));
@@ -990,7 +998,7 @@ export const useEditor = create<EditorState>()((set, get) => {
       clipboard = { els: clipboard.els, pasted: 0 };
     },
     loadProject: resetProject,
-    markSaved: (filePath) => set({ filePath, saved: { screen: get().screen, pages: get().pages, site: get().site } }),
+    markSaved: (filePath, snapshot = { screen: get().screen, pages: get().pages, site: get().site }) => set({ filePath, saved: snapshot }),
     setScreen({ w, h }) {
       set({ screen: { w, h }, setup: null, source: 'page', elements: view(currentPage(get()).elements, false, get().site, { w, h }) });
       if (get().device === 'sp') get().setDevice(hasMobileLayout(w) ? 'sp' : 'pc');

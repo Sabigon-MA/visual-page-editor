@@ -7,27 +7,21 @@ import { currentPage, useEditor, type EditorState } from '../../store/elements';
 import { mergeElements } from '../../store/merge';
 import type { CodeFormat, PageElement } from '../../types/element';
 import styles from './CodeEditor.module.css';
+import { deleteDraft, dropStaleDrafts, getDraft, registerCodeEditor, setDraft, type CodeTarget } from './drafts';
 import { monaco } from './monacoSetup';
 
 const PARSE_DELAY = 300; // 入力が止まってからキャンバスへ反映するまで（ms）
 
-// エラーがあってキャンバスに反映できていない書きかけのコード（ページ・形式ごと）。
-// 別のページや形式に切り替えても失われないよう、コンポーネントの外に置く。
-interface Draft {
-  code: string;
-  base: PageElement[]; // このコードを書き始めたときの要素配列（3-way マージの基準）
-}
-const drafts = new Map<string, Draft>();
-const draftKey = (pageId: string, format: CodeFormat) => `${pageId}:${format}`;
-
 // コードに書くのは PC の値と sp（スマホの表示で編集していても同じ）
 const pageElements = (s: EditorState) => currentPage(s).elements;
 const codeOf = (s: EditorState, format: CodeFormat) => generatePageCode(pageElements(s), currentPage(s), s.screen, format, pageBg(currentPage(s), s.site));
+const targetOf = (s: EditorState, format: CodeFormat): CodeTarget => ({ rev: s.projectRev, pageId: s.pageId, format });
 
 // プログラマーモードのコードエディタ。表示中のページのコードを、キャンバス（Store）と双方向に同期する。
 //
 // コードにエラーがある間は、キャンバスの変更でコードを上書きしない（書きかけのコードを守る）。
 // エラーが直ったら、その間のキャンバスでの変更とコードの変更を合わせて反映する。
+// 反映するのは、そのコードを書いたプロジェクト・ページ・形式だけ（切り替えた後の別のページには当てない）。
 export default function CodeEditor() {
   const format = useEditor((s) => s.codeFormat);
   const setCodeFormat = useEditor((s) => s.setCodeFormat);
@@ -37,13 +31,16 @@ export default function CodeEditor() {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const applying = useRef(false); // キャンバス由来でコードを書き換えている最中
   const timer = useRef<number | undefined>(undefined);
+  const target = useRef<CodeTarget>(targetOf(useEditor.getState(), format)); // エディタに出しているコードの対象
   const base = useRef<PageElement[]>(pageElements(useEditor.getState())); // コードが最後にキャンバスと一致していたときの要素配列
+  const latest = useRef(''); // エディタのいまのコード（閉じるときに Monaco が先に片付けられても残す）
   const dirty = useRef(false); // コードを編集してから、まだキャンバスに反映していない
   const cleanup = useRef<(() => void) | null>(null);
 
+  // 閉じるとき（コード画面を閉じる・画面遷移図やスタート画面へ移る）も、入力待ちのコードを反映するか書きかけとして残す
   useEffect(() => () => {
+    flush();
     cleanup.current?.();
-    window.clearTimeout(timer.current);
   }, []);
 
   const showErrors = (errs: ParseError[]) => {
@@ -65,15 +62,15 @@ export default function CodeEditor() {
 
   // Store → コード。reset のときは Monaco の取り消し履歴も消す（別のページのコードに戻らないように）
   const pushCode = (text: string, reset = false) => {
-    const ed = editorRef.current;
-    const model = ed?.getModel();
-    if (!ed || !model) return;
     window.clearTimeout(timer.current);
     base.current = pageElements(useEditor.getState());
+    latest.current = text;
     dirty.current = false;
     setHeld(false);
     showErrors([]);
-    if (model.getValue() === text) return;
+    const ed = editorRef.current;
+    const model = ed?.getModel();
+    if (!ed || !model || model.getValue() === text) return;
     applying.current = true;
     if (reset) {
       model.setValue(text);
@@ -85,48 +82,58 @@ export default function CodeEditor() {
     applying.current = false;
   };
 
-  // コード → Store。成功したら true
-  const applyCode = (code: string, fmt: CodeFormat): boolean => {
+  // コード → Store。t はそのコードの対象。反映できた（反映先がもうない）なら true、エラーなら書きかけとして残して false
+  const applyCode = (code: string, t: CodeTarget): boolean => {
     const s = useEditor.getState();
-    const result = fromCode(code, fmt, { pageIds: s.pages.map((p) => p.id) });
+    if (s.projectRev !== t.rev) return true; // 別のプロジェクトになった。前のプロジェクトのコードは当てない
+    const page = s.pages.find((p) => p.id === t.pageId);
+    if (!page) {
+      deleteDraft(t); // ページが削除された
+      return true;
+    }
+    const shown = t === target.current; // エディタに出しているコード
+    const result = fromCode(code, t.format, { pageIds: s.pages.map((p) => p.id) });
     if (!result.ok) {
-      showErrors(result.errors);
+      setDraft(t, { code, base: base.current });
+      if (shown) showErrors(result.errors);
       return false;
     }
     // コードの編集中にキャンバスでも変更があれば、両方を合わせる
-    const canvasChanged = pageElements(s) !== base.current;
-    const merged = canvasChanged ? mergeElements(base.current, result.elements, pageElements(s)) : result.elements;
-    drafts.delete(draftKey(s.pageId, fmt));
+    const canvasChanged = page.elements !== base.current;
+    const merged = canvasChanged ? mergeElements(base.current, result.elements, page.elements) : result.elements;
+    deleteDraft(t);
+    s.replaceFromCode(merged, t.pageId);
+    if (!shown) return true;
     dirty.current = false;
     setHeld(false);
     showErrors([]);
-    s.replaceFromCode(merged);
-    base.current = pageElements(useEditor.getState());
-    if (canvasChanged && fmt === useEditor.getState().codeFormat) pushCode(codeOf(useEditor.getState(), fmt));
+    const now = useEditor.getState();
+    base.current = now.pages.find((p) => p.id === t.pageId)!.elements;
+    if (canvasChanged && now.pageId === t.pageId && now.codeFormat === t.format) pushCode(codeOf(now, t.format));
     return true;
   };
 
   // 表示中のページのコードを読み込む（書きかけがあればそれを復元する）
   const load = (s: EditorState, fmt: CodeFormat) => {
-    const draft = drafts.get(draftKey(s.pageId, fmt));
+    target.current = targetOf(s, fmt);
+    const draft = getDraft(target.current);
     pushCode(codeOf(s, fmt), true);
     if (!draft) return;
     applying.current = true;
     editorRef.current?.getModel()?.setValue(draft.code);
     applying.current = false;
+    latest.current = draft.code;
     base.current = draft.base;
     dirty.current = true;
-    applyCode(draft.code, fmt);
+    applyCode(draft.code, target.current);
   };
 
-  // 未反映の編集を、今の形式で解析する。エラーなら書きかけとして残す
-  const flush = (pageId: string, fmt: CodeFormat) => {
+  // 未反映の編集を、書いたときの対象（プロジェクト・ページ・形式）に反映する。エラーなら書きかけとして残す
+  function flush() {
     window.clearTimeout(timer.current);
-    const code = editorRef.current?.getModel()?.getValue();
-    if (!dirty.current || code === undefined) return;
-    if (useEditor.getState().pageId === pageId && applyCode(code, fmt)) return;
-    drafts.set(draftKey(pageId, fmt), { code, base: base.current });
-  };
+    if (!dirty.current) return;
+    if (applyCode(latest.current, target.current)) dirty.current = false;
+  }
 
   // 選択中の要素の行を強調表示する
   const highlight = (id: string | null) => {
@@ -145,15 +152,22 @@ export default function CodeEditor() {
     const fmt = useEditor.getState().codeFormat;
     load(useEditor.getState(), fmt);
     const decorations = ed.createDecorationsCollection(highlight(useEditor.getState().selectedId));
+    const unregister = registerCodeEditor(flush);
     const unsub = useEditor.subscribe((s, prev) => {
+      if (s.projectRev !== prev.projectRev) {
+        // 新規作成・開くで別のプロジェクトになった（書きかけを捨てるかは確認済み）。新しいプロジェクトのコードを出す
+        dropStaleDrafts(s.projectRev);
+        load(s, fmt);
+        decorations.set(highlight(s.selectedId));
+        return;
+      }
       if (s.codeFormat !== prev.codeFormat) {
         // 形式を切り替える前に、待っている解析を元の形式で済ませる（このエディタは作り直される）
-        flush(prev.pageId, prev.codeFormat);
+        flush();
         return;
       }
       if (s.pageId !== prev.pageId) {
-        if (dirty.current) drafts.set(draftKey(prev.pageId, fmt), { code: ed.getModel()!.getValue(), base: base.current });
-        window.clearTimeout(timer.current);
+        flush(); // 前のページのコードは前のページに反映する（エラーなら書きかけとして残す）
         load(s, fmt);
       } else if (s.elements !== prev.elements || s.screen !== prev.screen || currentPage(s).name !== currentPage(prev).name) {
         if (s.source === 'code') {
@@ -168,15 +182,20 @@ export default function CodeEditor() {
     });
     cleanup.current = () => {
       unsub();
+      unregister();
       decorations.clear();
     };
   };
 
   const onChange = (value: string | undefined) => {
     if (applying.current || value === undefined) return;
+    latest.current = value;
     dirty.current = true;
+    const t = target.current;
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => applyCode(value, useEditor.getState().codeFormat), PARSE_DELAY);
+    timer.current = window.setTimeout(() => {
+      if (applyCode(value, t) && t === target.current) dirty.current = false;
+    }, PARSE_DELAY);
   };
 
   const jumpTo = (e: ParseError) => {
@@ -188,7 +207,7 @@ export default function CodeEditor() {
   };
 
   const discard = () => {
-    drafts.delete(draftKey(page.id, format));
+    deleteDraft(target.current);
     pushCode(codeOf(useEditor.getState(), format), true);
   };
 

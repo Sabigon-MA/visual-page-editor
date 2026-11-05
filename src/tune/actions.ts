@@ -88,13 +88,21 @@ export async function saveTune(): Promise<boolean> {
   }
 }
 
+// 保存していない変更があれば、保存するか尋ねる。続けてよければ true（キャンセル・保存に失敗したら false）。
+// 保存を待つ間に変更があれば、もう一度尋ねる
+export async function askSaveTune(): Promise<boolean> {
+  while (isTuneDirty(useTune.getState())) {
+    const choice = await choiceDialog({ title: '調整した見た目を保存しますか？', ok: '保存する', alt: '保存しない' });
+    if (choice === 'cancel') return false;
+    if (choice === 'alt') return true;
+    if (!(await saveTune())) return false;
+  }
+  return true;
+}
+
 // 保存していない変更があれば確かめてから閉じる
 export async function closeTune() {
-  if (isTuneDirty(useTune.getState())) {
-    const choice = await choiceDialog({ title: '調整した見た目を保存しますか？', ok: '保存する', alt: '保存しない' });
-    if (choice === 'cancel') return;
-    if (choice === 'ok' && !(await saveTune())) return;
-  }
+  if (!(await askSaveTune())) return;
   resetTune();
   await invoke('tune_stop').catch(() => {});
 }
